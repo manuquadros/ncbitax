@@ -101,8 +101,8 @@ def column_info(table: str) -> dict[str, str]:
 
 
 def load_df(table: str) -> pd.DataFrame:
-    if table[:-4] == ".dmp":
-        table = table[:4]
+    if table[-4:] == ".dmp":
+        table = table[:-4]
 
     filepath = ROOTDIR / f"resources/{table}.parquet.zst"
 
