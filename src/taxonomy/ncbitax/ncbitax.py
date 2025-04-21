@@ -3,9 +3,23 @@ import tarfile
 from io import TextIOBase, TextIOWrapper, BufferedReader
 import pandas as pd
 from typing import IO, cast
+import sys
+import csv
 
 ROOTDIR = pathlib.Path(__file__).parent.parent.parent.parent
 taxdump = ROOTDIR / "resources/taxdump.tar.gz"
+
+# Increase CSV field size limit to maximum possible to account for long lists
+# of tax_id's in rows of the citations table.
+# https://stackoverflow.com/a/15063941
+field_size_limit = sys.maxsize
+
+while True:
+    try:
+        csv.field_size_limit(field_size_limit)
+        break
+    except OverflowError:
+        field_size_limit = int(field_size_limit / 10)
 
 
 class NCBIDump(TextIOBase):
