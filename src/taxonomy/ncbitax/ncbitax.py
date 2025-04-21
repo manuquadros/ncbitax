@@ -151,5 +151,11 @@ def load_df(table: str) -> pd.DataFrame:
         return df
 
 
-def names_df() -> pd.DataFrame:
-    return load_df("names")
+def get_bacteria() -> set[str]:
+    """Load the terms that correspond to bacteria in the NCBI taxonomy."""
+    # TODO
+
+
+def is_bacteria(query: str) -> bool:
+    """Return True if `query` is a bacteria in the NCBI taxonomy."""
+    pass
