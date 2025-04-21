@@ -32,55 +32,72 @@ class NCBIDump(TextIOBase):
         self._file.close()
 
 
-def colnames(table: str) -> str:
-    """Return the column names for each file (table) in the NCBI dump."""
+def column_info(table: str) -> dict[str, str]:
+    """Return names and types for each column in a table of the NCBI dump"""
     match table:
         case "names":
-            return ("tax_id", "name_txt", "unique_name", "name_class")
+            return {
+                "tax_id": "UInt32",
+                "name_txt": "string",
+                "unique_name": "string",
+                "name_class": "category",
+            }
         case "nodes":
-            return (
-                "tax_id",
-                "parent_tax_id",
-                "rank",
-                "embl_code",
-                "division_id",
-                "inherited_div_flag",
-                "genetic_code_id",
-                "inherited_gc_flag",
-                "mitochondrial_genetic_code",
-                "inherited_mgc_flag",
-                "genbank_hidden_flag",
-                "hidden_subtree_root_flag",
-                "comments",
-            )
+            return {
+                "tax_id": "UInt32",
+                "parent_tax_id": "UInt32",
+                "rank": "category",
+                "embl_code": "category",
+                "division_id": "UInt8",
+                "inherited_div_flag": "UInt8",
+                "genetic_code_id": "UInt64",
+                "inherited_gc_flag": "UInt8",
+                "mitochondrial_genetic_code": "UInt64",
+                "inherited_mgc_flag": "UInt8",
+                "genbank_hidden_flag": "UInt8",
+                "hidden_subtree_root_flag": "UInt8",
+                "comments": "string",
+            }
         case "division":
-            return ("division_id", "division_cde", "division_name", "comments")
+            return {
+                "division_id": "UInt8",
+                "division_cde": "string",
+                "division_name": "string",
+                "comments": "string",
+            }
         case "gencode":
-            return ("genetic_code_id", "abbreviation", "name", "cde", "starts")
+            return {
+                "genetic_code_id": "UInt64",
+                "abbreviation": "string",
+                "name": "string",
+                "cde": "string",
+                "starts": "string",
+            }
         case "delnodes":
-            return ("tax_id",)
+            return {"tax_id": "UInt32"}
         case "merged":
-            return ("old_tax_id", "new_tax_id")
+            return {"old_tax_id": "string", "new_tax_id": "string"}
         case "citations":
-            return (
-                "cit_id",
-                "cit_key",
-                "medline_id",
-                "pubmed_id",
-                "url",
-                "text",
-            )
+            return {
+                "cit_id": "UInt32",
+                "cit_key": "string",
+                "medline_id": "UInt32",
+                "pubmed_id": "UInt32",
+                "url": "string",
+                "text": "string",
+                "taxid_list": "string",
+            }
         case "images":
-            return (
-                "image_id",
-                "image_key",
-                "url",
-                "license",
-                "attribution",
-                "source",
-                "properties",
-                "taxid_list",
-            )
+            return {
+                "image_id": "UInt32",
+                "image_key": "string",
+                "url": "string",
+                "license": "category",
+                "attribution": "string",
+                "source": "category",
+                "properties": "string",
+                "taxid_list": "UInt32",
+            }
 
 
 def load_df(table: str) -> pd.DataFrame:
@@ -93,12 +110,14 @@ def load_df(table: str) -> pd.DataFrame:
         return pd.read_parquet(filepath, engine="pyarrow")
     except FileNotFoundError:
         with NCBIDump(table) as table:
+        colinfo = column_info(table)
             df = pd.read_csv(
                 table,
                 sep=r"\t\|\t",
                 engine="python",
                 header=None,
-                names=colnames(table),
+                names=colinfo.keys(),
+                dtype=colinfo,
             )
 
         df.to_parquet(
