@@ -5,6 +5,7 @@ import pandas as pd
 from typing import IO, cast
 import sys
 import csv
+import re
 
 ROOTDIR = pathlib.Path(__file__).parent.parent.parent.parent
 taxdump = ROOTDIR / "resources/taxdump.tar.gz"
@@ -23,21 +24,31 @@ while True:
 
 
 class NCBIDump(TextIOBase):
-    def __init__(self, table: str):
+    def __init__(self, table: str, sep=","):
         if table[:-4] != ".dmp":
             table = table + ".dmp"
 
         self._file = TextIOWrapper(
             tarfile.open(taxdump).extractfile(table), encoding="utf-8"
         )
+        self._delimiter = r"\t\|\t|\t\|\n"
+        self._unquoted_field = re.compile(
+            rf"(^|{self._delimiter})([^\t]*,[^\t]*)(?={self._delimiter})"
+        )
+        self.sep = sep
+        self.unescaped_quote = re.compile(r'(?<!\\)"')
+
+    def preprocess(self, text: str) -> str:
+        text = self.unescaped_quote.sub(r"\"", text)
+        return self._unquoted_field.sub(r'\1"\2"', text)
 
     def readline(self, *args):
-        line = self._file.readline(*args)
-        return line[:-3]
+        line = self.preprocess(self._file.readline(*args))
 
-    def read(self, *args):
-        chunk = self._file.read(*args)
-        return chunk.replace("\t|\n", "\n")
+        if line:
+            return line.replace("\t|\t", self.sep).replace("\t|\n", "\n")
+        else:
+            return ""
 
     def __enter__(self):
         return self
