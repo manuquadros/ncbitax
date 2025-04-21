@@ -109,13 +109,13 @@ def load_df(table: str) -> pd.DataFrame:
     try:
         return pd.read_parquet(filepath, engine="pyarrow")
     except FileNotFoundError:
-        with NCBIDump(table) as table:
         colinfo = column_info(table)
+        with NCBIDump(table) as stream:
             df = pd.read_csv(
-                table,
-                sep=r"\t\|\t",
+                stream,
                 engine="python",
                 header=None,
+                escapechar="\\",
                 names=colinfo.keys(),
                 dtype=colinfo,
             )
