@@ -33,14 +33,14 @@ class NCBIDump(TextIOBase):
         )
         self._delimiter = r"\t\|\t|\t\|\n"
         self._unquoted_field = re.compile(
-            rf"(^|{self._delimiter})([^\t]*,[^\t]*)(?={self._delimiter})"
+            rf"([^\t]*,[^\t]*)(?={self._delimiter})"
         )
         self.sep = sep
         self.unescaped_quote = re.compile(r'(?<!\\)"')
 
     def preprocess(self, text: str) -> str:
         text = self.unescaped_quote.sub(r"\"", text)
-        return self._unquoted_field.sub(r'\1"\2"', text)
+        return self._unquoted_field.sub(r'"\1"', text)
 
     def readline(self, *args):
         line = self.preprocess(self._file.readline(*args))
