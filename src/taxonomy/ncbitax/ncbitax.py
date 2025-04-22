@@ -189,6 +189,7 @@ def name_index() -> dict[str, tuple[str, int]]:
         "synonym",
         "equivalent name",
         "common name",
+        "type_material",
     }
 
     names = names[names["name_class"].isin(valid_classes)]
@@ -261,6 +262,18 @@ def get_bacteria() -> set[int]:
     return bacteria_ids
 
 
+def get_node(query: str) -> pd.Series | None:
+    """Return the `query`'s node in the taxonomy if it exists."""
+    tax_id = resolve_tax_id(query)
+    nodes = load_df("nodes")
+    node_row = nodes[nodes["tax_id"] == tax_id]
+
+    if node_row.empty:
+        return None
+
+    return node_row.iloc[0]
+
+
 def is_bacterial_strain(query: str) -> bool:
     """
     Determine whether the query refers to a bacterial strain or subspecies.
@@ -268,15 +281,61 @@ def is_bacterial_strain(query: str) -> bool:
     :param query: Scientific name (possibly fuzzy), e.g., 'E. coli K12'
     :return: True if the resolved tax_id is bacterial and has rank 'strain'
     """
-    tax_id = resolve_tax_id(query)
+    node = get_node(query)
 
-    nodes = load_df("nodes")
-    node_row = nodes[nodes["tax_id"] == tax_id]
-    if node_row.empty:
+    if node is None:
         return False
 
-    rank = node_row.iloc[0]["rank"]
-    return rank == "strain"
+    return node["rank"] == "strain"
+
+
+class DecomposedName:
+    species: str | None
+    strain: str | None
+
+
+def decompose_strain_name(query: str) -> DecomposedName | None:
+    """Return the species name and the strain identifier from `query`."""
+    node = get_node(query)
+
+    if node is None:
+        return node
+
+    # If this isn't a strain, return None, unless it is a species.
+    if node["rank"] != "strain":
+        if node["rank"] == "species":
+            return DecomposedName(species=query, strain=None)
+        else:
+            return None
+
+    # Get the lineage by walking up the taxonomy tree until we hit species rank
+    nodes = load_df("nodes")
+    names = load_df("names")
+
+    current_id = node["tax_id"]
+    while True:
+        current_node = nodes[nodes["tax_id"] == current_id].iloc[0]
+        if current_node["rank"] == "species":
+            # Found the species, get its name
+            species_name = names[
+                (names["tax_id"] == current_id)
+                & (names["name_class"] == "scientific name")
+            ]["name_txt"].iloc[0]
+
+            # Get the strain name
+            strain_name = names[
+                (names["tax_id"] == node["tax_id"])
+                & (names["name_class"] == "scientific name")
+            ]["name_txt"].iloc[0]
+
+            return DecomposedName(
+                species=species_name,
+                strain=strain_name.replace(species_name, "").strip(),
+            )
+
+        current_id = current_node["parent_tax_id"]
+        if current_id == 1:  # Hit root without finding species
+            return DecomposedName(species=None, strain=None)
 
 
 def is_bacteria(query: str) -> bool:
