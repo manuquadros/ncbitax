@@ -12,9 +12,7 @@ import pandas as pd
 
 ROOTDIR = pathlib.Path(__file__).parent.parent.parent.parent
 taxdump = ROOTDIR / "resources/taxdump.tar.gz"
-BACTERIA_CACHE_PATH = ROOTDIR / "resources/bacteria_set.pickle"
 NAMEINDEX_CACHE_PATH = ROOTDIR / "resources/name_index.pickle"
-NODES_PARQUET_PATH = ROOTDIR / "resources/nodes.parquet.zst"
 NAMES_PARQUET_PATH = ROOTDIR / "resources/names.parquet.zst"
 
 # Increase CSV field size limit to maximum possible to account for long lists
@@ -218,47 +216,14 @@ def resolve_tax_id(query: str) -> int | None:
 
 @cache
 def get_bacteria() -> set[int]:
-    """
-    Load the set of tax_id values that represent bacterial species
-    in the NCBI taxonomy. Cache to disk, invalidate when source changes.
+    """Load the set of tax_id values that represent bacterial species
+    in the NCBI taxonomy.
 
     :return: A set of tax_ids corresponding to bacteria
     """
-    source_mtime = NODES_PARQUET_PATH.stat().st_mtime
-
-    if BACTERIA_CACHE_PATH.exists():
-        with open(BACTERIA_CACHE_PATH, "rb") as f:
-            cache = pickle.load(f)
-            if cache.get("mtime") == source_mtime:
-                return cache["data"]
-
-    # Load fresh data and rebuild cache
     nodes = load_df("nodes")
 
-    # Build parent → children index
-    parent_map: dict[int, list[int]] = {}
-    for row in nodes.itertuples():
-        parent_map.setdefault(row.parent_tax_id, []).append(row.tax_id)
-
-    # Find all descendants of tax_id 2
-    stack = [2]
-    bacteria_tax_ids = set()
-
-    while stack:
-        current = stack.pop()
-        bacteria_tax_ids.add(current)
-        children = parent_map.get(current, [])
-        stack.extend(children)
-
-    # Filter species in that subtree
-    bacteria_species = nodes[
-        (nodes["rank"] == "species") & (nodes["tax_id"].isin(bacteria_tax_ids))
-    ]
-
-    bacteria_ids = set(bacteria_species["tax_id"])
-
-    with open(BACTERIA_CACHE_PATH, "wb") as f:
-        pickle.dump({"mtime": source_mtime, "data": bacteria_ids}, f)
+    bacteria_ids = set(nodes[nodes["division_id"] == 0]["tax_id"])
 
     return bacteria_ids
 
