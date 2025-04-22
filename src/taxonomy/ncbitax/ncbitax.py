@@ -4,6 +4,7 @@ import pickle
 import re
 import sys
 import tarfile
+from dataclasses import dataclass
 from functools import cache
 from io import TextIOBase, TextIOWrapper
 
@@ -289,6 +290,7 @@ def is_bacterial_strain(query: str) -> bool:
     return node["rank"] == "strain"
 
 
+@dataclass
 class DecomposedName:
     species: str | None
     strain: str | None
