@@ -5,7 +5,7 @@ import re
 import sys
 import tarfile
 from dataclasses import dataclass
-from functools import cache
+from functools import cache, lru_cache
 from io import TextIOBase, TextIOWrapper
 
 import pandas as pd
@@ -214,20 +214,7 @@ def resolve_tax_id(query: str) -> int | None:
     return name_index().get(normalize(query), (None, None))[1]
 
 
-@cache
-def get_bacteria() -> set[int]:
-    """Load the set of tax_id values that represent bacterial species
-    in the NCBI taxonomy.
-
-    :return: A set of tax_ids corresponding to bacteria
-    """
-    nodes = load_df("nodes")
-
-    bacteria_ids = set(nodes[nodes["division_id"] == 0]["tax_id"])
-
-    return bacteria_ids
-
-
+@lru_cache
 def get_node(query: str) -> pd.Series | None:
     """Return the `query`'s node in the taxonomy if it exists."""
     tax_id = resolve_tax_id(query)
@@ -240,19 +227,36 @@ def get_node(query: str) -> pd.Series | None:
     return node_row.iloc[0]
 
 
+def get_rank(query: str) -> str | None:
+    """Get the taxonomic rank of `query`."""
+    node = get_node(query)
+
+    if node is not None:
+        return node["rank"]
+
+
 def is_bacterial_strain(query: str) -> bool:
-    """
-    Determine whether the query refers to a bacterial strain or subspecies.
+    """Determine whether the query refers to a bacterial strain.
 
     :param query: Scientific name (possibly fuzzy), e.g., 'E. coli K12'
     :return: True if the resolved tax_id is bacterial and has rank 'strain'
     """
+    return get_rank(query) == "strain"
+
+
+def is_bacteria(query: str) -> bool:
+    """
+    Determine whether the given query refers to a bacterial taxon.
+
+    :param query: Scientific name (possibly fuzzy), e.g., 'E. coli'
+    :return: True if the query resolves to a bacterial tax_id, else False
+    """
     node = get_node(query)
 
-    if node is None:
-        return False
+    if node is not None:
+        return node["division_id"] == 0
 
-    return node["rank"] == "strain"
+    return False
 
 
 @dataclass
@@ -303,17 +307,3 @@ def decompose_strain_name(query: str) -> DecomposedName | None:
         current_id = current_node["parent_tax_id"]
         if current_id == 1:  # Hit root without finding species
             return DecomposedName(species=None, strain=None)
-
-
-def is_bacteria(query: str) -> bool:
-    """
-    Determine whether the given query refers to a bacterial taxon.
-
-    :param query: Scientific name (possibly fuzzy), e.g., 'E. coli'
-    :return: True if the query resolves to a bacterial tax_id, else False
-    """
-    tax_id = resolve_tax_id(query)
-    if tax_id is None:
-        return False
-
-    return tax_id in get_bacteria()
