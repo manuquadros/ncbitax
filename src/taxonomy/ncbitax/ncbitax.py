@@ -188,7 +188,7 @@ def name_index() -> dict[str, tuple[str, int]]:
         "synonym",
         "equivalent name",
         "common name",
-        "type_material",
+        "type material",
     }
 
     names = names[names["name_class"].isin(valid_classes)]
