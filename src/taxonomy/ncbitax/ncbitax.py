@@ -274,18 +274,21 @@ def decompose_strain_name(query: str) -> DecomposedName | None:
     if node is None:
         return node
 
-    # If this isn't a strain, return None, unless it is a species.
-    if node["rank"] != "strain":
-        if node["rank"] == "species":
-            return DecomposedName(species=query, strain=None)
-        else:
-            return None
-
-    # Get the lineage by walking up the taxonomy tree until we hit species rank
     nodes = load_df("nodes")
     names = load_df("names")
 
+    if node["rank"] not in ("strain", "species"):
+        return None
+
     current_id = node["tax_id"]
+    # Check if `node` is a type strain
+    exact_match = names[
+        (names["tax_id"] == current_id) & (names["name_txt"] == query)
+    ].iloc[0]
+    if exact_match["name_class"] == "type material":
+        return DecomposedName(species=None, strain=query)
+
+    # Get the lineage by walking up the taxonomy tree until we hit species rank
     while True:
         current_node = nodes[nodes["tax_id"] == current_id].iloc[0]
         if current_node["rank"] == "species":
