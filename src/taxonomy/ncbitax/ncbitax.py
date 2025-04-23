@@ -301,7 +301,7 @@ def decompose_strain_name(query: str) -> DecomposedName | None:
 
             return DecomposedName(
                 species=species_name,
-                strain=strain_name.replace(species_name, "").strip(),
+                strain=strain_name.replace(species_name, "").strip() or None,
             )
 
         current_id = current_node["parent_tax_id"]
