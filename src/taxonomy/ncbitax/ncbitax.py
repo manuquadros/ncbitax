@@ -128,6 +128,8 @@ def column_info(table: str) -> dict[str, str]:
                 "properties": "string",
                 "taxid_list": "UInt32",
             }
+        case _:
+            return {}
 
 
 def load_df(table: str) -> pd.DataFrame:
