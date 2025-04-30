@@ -270,10 +270,13 @@ class DecomposedName:
 
 def decompose_name(query: str) -> DecomposedName | None:
     """Return the species name and the strain identifier from `query`."""
+    if not query:
+        return None
+
     node = get_node(query)
 
     if node is None:
-        return node
+        return decompose_name(" ".join(query.split()[:-1]))
 
     nodes = load_df("nodes")
     names = load_df("names")
