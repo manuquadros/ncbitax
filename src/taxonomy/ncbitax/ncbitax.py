@@ -6,6 +6,7 @@ import sys
 import tarfile
 from dataclasses import dataclass
 from functools import cache, lru_cache
+from loggers import stderr_logger
 from io import TextIOBase, TextIOWrapper
 
 import pandas as pd
@@ -282,11 +283,16 @@ def decompose_name(query: str) -> DecomposedName | None:
 
     current_id = node["tax_id"]
     # Check if `node` is a type strain
-    exact_match = names[
-        (names["tax_id"] == current_id) & (names["name_txt"] == query)
-    ].iloc[0]
-    if exact_match["name_class"] == "type material":
-        return DecomposedName(species=None, strain=query)
+
+    try:
+        exact_match = names[
+            (names["tax_id"] == current_id) & (names["name_txt"] == query)
+        ].iloc[0]
+        if exact_match["name_class"] == "type material":
+            return DecomposedName(species=None, strain=query)
+    except IndexError:
+        msg = f"No match for {current_id} and {query} in the NCBI Taxonomy."
+        stderr_logger().debug(msg)
 
     # Get the lineage by walking up the taxonomy tree until we hit species rank
     while True:
