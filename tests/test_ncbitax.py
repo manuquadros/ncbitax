@@ -2,7 +2,7 @@ from taxonomy.ncbitax import (
     resolve_tax_id,
     is_bacteria,
     is_bacterial_strain,
-    decompose_strain_name,
+    decompose_name,
     DecomposedName,
 )
 
@@ -26,14 +26,14 @@ def test_is_bacteria_and_strain():
 
 
 def test_decompose_name():
-    assert decompose_strain_name(
-        "Cronbergia siamensis CCALA 756"
-    ) == DecomposedName(species="Cronbergia siamensis", strain="SAG 11.82")
+    assert decompose_name("Cronbergia siamensis CCALA 756") == DecomposedName(
+        species="Cronbergia siamensis", strain="SAG 11.82"
+    )
 
-    assert decompose_strain_name(
+    assert decompose_name(
         "Raphidiopsis brookii",
     ) == DecomposedName(species="Raphidiopsis brookii", strain=None)
 
-    assert decompose_strain_name("ATCC 51142") == DecomposedName(
+    assert decompose_name("ATCC 51142") == DecomposedName(
         species=None, strain="ATCC 51142"
     )

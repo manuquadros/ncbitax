@@ -267,7 +267,7 @@ class DecomposedName:
     strain: str | None
 
 
-def decompose_strain_name(query: str) -> DecomposedName | None:
+def decompose_name(query: str) -> DecomposedName | None:
     """Return the species name and the strain identifier from `query`."""
     node = get_node(query)
 
