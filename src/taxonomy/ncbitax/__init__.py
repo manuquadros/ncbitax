@@ -4,6 +4,7 @@ from .ncbitax import (
     is_bacteria,
     is_bacterial_strain,
     names,
+    nodes,
     normalize,
 )
 
@@ -13,5 +14,6 @@ __all__ = [
     "is_bacterial_strain",
     "is_bacteria",
     "names",
+    "nodes",
     "normalize",
 ]

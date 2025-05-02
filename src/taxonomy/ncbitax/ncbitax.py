@@ -182,6 +182,10 @@ def names() -> pd.DataFrame:
     return load_df("names")
 
 
+def nodes() -> pd.DataFrame:
+    return load_df("nodes")
+
+
 type NameIndex = dict[str, tuple[str, int]]
 
 
