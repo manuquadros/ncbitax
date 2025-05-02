@@ -210,72 +210,75 @@ def save_index(index: NameIndex, path: os.PathLike) -> None:
         pickle.dump({"mtime": source_mtime(), "data": index}, f)
 
 
-def bacspecies_nodes() -> pd.DataFrame:
-    nodes = load_df("nodes")
-    return nodes[(nodes["division_id"] == 0) & (nodes["rank"] == "species")]
-
-
-def bacstrain_nodes() -> pd.DataFrame:
-    nodes = load_df("nodes")
-    return nodes[(nodes["division_id"] == 0) & (nodes["rank"] == "strain")]
-
-
 @cache
-def bacteria_name_index() -> NameIndex:
-    """Build mapping from normalized bacteria names (and synonyms)
-    to (name, tax_id). Cache results.
-
-    Includes:
-    - Scientific names
-    - Synonyms
-    """
-    INDEX_CACHE_PATH = ROOTDIR / "resources/bacteria_name_index.pickle"
-    index = get_index(INDEX_CACHE_PATH)
+def bacterial_name_index(rank: str) -> NameIndex:
+    _cache_paths = {
+        "species": ROOTDIR / "resources/bacteria_name_index.pickle",
+        "strain": ROOTDIR / "resources/strain_name_index.pickle",
+    }
+    index_cache_path = _cache_paths[rank]
+    index = get_index(index_cache_path)
 
     if index:
         return index
     else:
-        print("Loading...")
-        bacnodes = bacspecies_nodes()
-        names = load_df("names")
-        names = names[
-            names["name_class"].isin(
-                ("synonym", "scientific name", "equivalent name", "common name")
+        bacnodes = nodes().query("division_id == 0 & rank == 'species'")
+        name_classes = (
+            "synonym",
+            "scientific name",
+            "equivalent name",
+            "common name",
+        )
+
+        is_bac_id = "(tax_id in @bacnodes['tax_id'].values)"
+
+        if rank == "species":
+            _names = names().query(
+                f"{is_bac_id} & (name_class in @name_classes)"
             )
-        ]
-        names = names[names["tax_id"].isin(bacnodes["tax_id"])]
+            desc = "Bacterial species names"
+        elif rank == "strain":
+            strain_nodes = nodes().query("division_id == 0 & rank == 'strain'")
+            type_material = f"{is_bac_id} & name_class == 'type material'"
+            is_strain_id = "tax_id in @strain_nodes['tax_id'].values"
+            strain_node_cond = f"{is_strain_id} & name_class in @name_classes"
+
+            _names = names().query(f"({type_material}) | ({strain_node_cond})")
+            desc = "Bacterial strain names"
+
         scinames = dict(
-            names[names["name_class"] == "scientific name"][
+            _names.query("name_class == 'scientific name'")[
                 ["tax_id", "name_txt"]
             ].values
         )
-
-        names["norm"] = names["name_txt"].apply(normalize)
+        _names["norm"] = _names["name_txt"].apply(normalize)
 
         index = {
             row.norm: (scinames.get(row.tax_id, row.name_txt), row.tax_id)
             for row in tqdm(
-                names.itertuples(index=False),
-                total=len(names),
-                desc="Bacterial names",
+                _names.itertuples(index=False),
+                total=len(_names),
+                desc=desc,
             )
         }
 
-    save_index(index=index, path=INDEX_CACHE_PATH)
+    save_index(index=index, path=index_cache_path)
 
     return index
 
 
-
-
 def resolve_tax_id(query: str) -> int | None:
-    """Resolve a scientific name or synonym to its tax_id, with normalization
-    Cache results.
+    """Resolve a scientific name or synonym to its tax_id
 
     :param query: e.g. 'E. coli', 'Staph. aureus'
     :return: tax_id or None
     """
-    return name_index().get(normalize(query), (None, None))[1]
+    normed = normalize(query)
+    result = bacterial_name_index("species").get(
+        normed
+    ) or bacterial_name_index("strain").get(normed)
+    if result:
+        return result[1]
 
 
 @lru_cache

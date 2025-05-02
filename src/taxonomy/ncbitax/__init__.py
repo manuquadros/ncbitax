@@ -1,5 +1,5 @@
 from .ncbitax import (
-    bacteria_name_index,
+    bacterial_name_index,
     decompose_name,
     is_bacteria,
     is_bacterial_strain,
@@ -9,7 +9,7 @@ from .ncbitax import (
 )
 
 __all__ = [
-    "bacteria_name_index",
+    "bacterial_name_index",
     "decompose_name",
     "is_bacterial_strain",
     "is_bacteria",
