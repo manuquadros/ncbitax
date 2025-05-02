@@ -159,12 +159,20 @@ def load_df(table: str) -> pd.DataFrame:
         return df
 
 
+def remove_citations(name: str) -> str:
+    year = r"(?:18|19|20)\d\d"
+    author = r"(?:[A-Z][a-z]+ )+(?:et al\.? )?"
+    citation = re.compile(rf"\(?{author}{year}\)?")
+    return citation.sub("", name).strip()
+
+
 def normalize(name: str) -> str:
     """
     Normalize a scientific name for fuzzy matching.
 
     Removes all non-alphanumeric characters and lowercases the result.
     """
+    name = remove_citations(name)
     return re.sub(r"[^a-z0-9]", "", name.lower())
 
 
