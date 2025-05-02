@@ -1,4 +1,5 @@
 import csv
+import os
 import pathlib
 import pickle
 import re
@@ -8,6 +9,7 @@ from dataclasses import dataclass
 from functools import cache, lru_cache
 from loggers import stderr_logger
 from io import TextIOBase, TextIOWrapper
+from tqdm import tqdm
 
 import pandas as pd
 
@@ -176,43 +178,90 @@ def normalize(name: str) -> str:
     return re.sub(r"[^a-z0-9]", "", name.lower())
 
 
+def names() -> pd.DataFrame:
+    return load_df("names")
+
+
+type NameIndex = dict[str, tuple[str, int]]
+
+
+def source_mtime() -> float:
+    NAMES_PARQUET_PATH = ROOTDIR / "resources/names.parquet.zst"
+
+    return NAMES_PARQUET_PATH.stat().st_mtime
+
+
+def get_index(index_file: os.PathLike) -> NameIndex:
+    if index_file.exists():
+        with open(index_file, "rb") as f:
+            cache = pickle.load(f)
+            if cache.get("mtime") >= source_mtime():
+                return cache["data"]
+
+    return {}
+
+
+def save_index(index: NameIndex, path: os.PathLike) -> None:
+    with path.open(mode="wb") as f:
+        pickle.dump({"mtime": source_mtime(), "data": index}, f)
+
+
+def bacspecies_nodes() -> pd.DataFrame:
+    nodes = load_df("nodes")
+    return nodes[(nodes["division_id"] == 0) & (nodes["rank"] == "species")]
+
+
+def bacstrain_nodes() -> pd.DataFrame:
+    nodes = load_df("nodes")
+    return nodes[(nodes["division_id"] == 0) & (nodes["rank"] == "strain")]
+
+
 @cache
-def name_index() -> dict[str, tuple[str, int]]:
-    """Build mapping from normalized names (and synonyms) to (name, tax_id).
-    Cache results.
+def bacteria_name_index() -> NameIndex:
+    """Build mapping from normalized bacteria names (and synonyms)
+    to (name, tax_id). Cache results.
 
     Includes:
     - Scientific names
     - Synonyms
     """
-    source_mtime = NAMES_PARQUET_PATH.stat().st_mtime
+    INDEX_CACHE_PATH = ROOTDIR / "resources/bacteria_name_index.pickle"
+    index = get_index(INDEX_CACHE_PATH)
 
-    if NAMEINDEX_CACHE_PATH.exists():
-        with open(NAMEINDEX_CACHE_PATH, "rb") as f:
-            cache = pickle.load(f)
-            if cache.get("mtime") == source_mtime:
-                return cache["data"]
+    if index:
+        return index
+    else:
+        print("Loading...")
+        bacnodes = bacspecies_nodes()
+        names = load_df("names")
+        names = names[
+            names["name_class"].isin(
+                ("synonym", "scientific name", "equivalent name", "common name")
+            )
+        ]
+        names = names[names["tax_id"].isin(bacnodes["tax_id"])]
+        scinames = dict(
+            names[names["name_class"] == "scientific name"][
+                ["tax_id", "name_txt"]
+            ].values
+        )
 
-    names = load_df("names")
-    valid_classes = {
-        "scientific name",
-        "synonym",
-        "equivalent name",
-        "common name",
-        "type material",
-    }
+        names["norm"] = names["name_txt"].apply(normalize)
 
-    names = names[names["name_class"].isin(valid_classes)]
-    index: dict[str, tuple[str, int]] = {}
+        index = {
+            row.norm: (scinames.get(row.tax_id, row.name_txt), row.tax_id)
+            for row in tqdm(
+                names.itertuples(index=False),
+                total=len(names),
+                desc="Bacterial names",
+            )
+        }
 
-    for tax_id, name in zip(names["tax_id"], names["name_txt"]):
-        norm = normalize(name)
-        index[norm] = (name, tax_id)
-
-    with open(NAMEINDEX_CACHE_PATH, "wb") as f:
-        pickle.dump({"mtime": source_mtime, "data": index}, f)
+    save_index(index=index, path=INDEX_CACHE_PATH)
 
     return index
+
+
 
 
 def resolve_tax_id(query: str) -> int | None:
