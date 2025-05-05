@@ -1,3 +1,7 @@
+import pandas as pd
+
+pd.options.mode.copy_on_write = True
+
 from .ncbitax import (
     bacterial_name_index,
     decompose_name,
@@ -7,6 +11,7 @@ from .ncbitax import (
     names,
     nodes,
     normalize,
+    remove_citations,  # temp
     resolve_tax_id,
 )
 
@@ -19,5 +24,6 @@ __all__ = [
     "names",
     "nodes",
     "normalize",
+    "remove_citations",  # temp
     "resolve_tax_id",
 ]

@@ -360,11 +360,12 @@ def decompose_name(query: str) -> DecomposedName | None:
         ].iloc[0]
         if exact_match["name_class"] == "type material":
             return DecomposedName(species=None, strain=query)
+        elif node["rank"] == "species":
+            return DecomposedName(species=query, strain=None)
     except IndexError:
-        msg = f"No match for {current_id} and {query} in the NCBI Taxonomy."
-        stderr_logger().debug(msg)
+        # Get the lineage by walking up the taxonomy tree until we hit species rank
+        pass
 
-    # Get the lineage by walking up the taxonomy tree until we hit species rank
     while True:
         current_node = nodes[nodes["tax_id"] == current_id].iloc[0]
         if current_node["rank"] == "species":
@@ -379,10 +380,11 @@ def decompose_name(query: str) -> DecomposedName | None:
                 (names["tax_id"] == node["tax_id"])
                 & (names["name_class"] == "scientific name")
             ]["name_txt"].iloc[0]
+            strain_name = strain_name.replace(species_name, "").strip() or None
 
             return DecomposedName(
                 species=species_name,
-                strain=strain_name.replace(species_name, "").strip() or None,
+                strain=strain_name,
             )
 
         current_id = current_node["parent_tax_id"]
