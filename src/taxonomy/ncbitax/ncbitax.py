@@ -174,7 +174,6 @@ def normalize(name: str) -> str:
 
     Removes all non-alphanumeric characters and lowercases the result.
     """
-    name = remove_citations(name)
     return re.sub(r"[^a-z0-9]", "", name.lower())
 
 
@@ -236,6 +235,10 @@ def bacterial_name_index(rank: str) -> NameIndex:
             _names = names().query(
                 f"{is_bac_id} & (name_class in @name_classes)"
             )
+            # For species names, we also remove citations before normalizing
+            _names["norm"] = _names["name_txt"].apply(
+                lambda n: normalize(remove_citations(n))
+            )
             desc = "Bacterial species names"
         elif rank == "strain":
             strain_nodes = nodes().query("division_id == 0 & rank == 'strain'")
@@ -244,6 +247,7 @@ def bacterial_name_index(rank: str) -> NameIndex:
             strain_node_cond = f"{is_strain_id} & name_class in @name_classes"
 
             _names = names().query(f"({type_material}) | ({strain_node_cond})")
+            _names["norm"] = _names["name_txt"].apply(normalize)
             desc = "Bacterial strain names"
 
         scinames = dict(
@@ -251,7 +255,6 @@ def bacterial_name_index(rank: str) -> NameIndex:
                 ["tax_id", "name_txt"]
             ].values
         )
-        _names["norm"] = _names["name_txt"].apply(normalize)
 
         index = {
             row.norm: (scinames.get(row.tax_id, row.name_txt), row.tax_id)
