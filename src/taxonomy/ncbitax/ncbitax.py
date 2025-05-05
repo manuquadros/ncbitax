@@ -7,7 +7,6 @@ import sys
 import tarfile
 from dataclasses import dataclass
 from functools import cache, lru_cache
-from loggers import stderr_logger
 from io import TextIOBase, TextIOWrapper
 from tqdm import tqdm
 
@@ -55,8 +54,7 @@ class NCBIDump(TextIOBase):
 
         if line:
             return line.replace("\t|\t", self.sep).replace("\t|\n", "\n")
-        else:
-            return ""
+        return ""
 
     def __enter__(self):
         self._tar = tarfile.open(taxdump)
@@ -64,7 +62,7 @@ class NCBIDump(TextIOBase):
         self._file = TextIOWrapper(tbl, encoding="utf-8")
         return self
 
-    def __exit__(self, type, value, traceback):
+    def __exit__(self, type_, value, traceback):
         self._tar.close()
         self._file.close()
 
@@ -226,59 +224,55 @@ def bacterial_name_index(rank: str) -> NameIndex:
 
     if index:
         return index
-    else:
-        bacnodes = nodes().query("division_id == 0 & rank == 'species'")
-        bac_genus_nodes = nodes().query("division_id == 0 & rank == 'genus'")
-        name_classes = (
-            "synonym",
-            "scientific name",
-            "equivalent name",
-            "common name",
+
+    bacnodes = nodes().query("division_id == 0 & rank == 'species'")
+    bac_genus_nodes = nodes().query("division_id == 0 & rank == 'genus'")
+    name_classes = (
+        "synonym",
+        "scientific name",
+        "equivalent name",
+        "common name",
+    )
+
+    is_bac_id = "(tax_id in @bacnodes['tax_id'].values)"
+
+    if rank == "species":
+        _names = names().query(f"{is_bac_id} & (name_class in @name_classes)")
+        # For species names, we also remove citations before normalizing
+        _names["norm"] = _names["name_txt"].apply(
+            lambda n: normalize(remove_citations(n))
         )
-
-        is_bac_id = "(tax_id in @bacnodes['tax_id'].values)"
-
-        if rank == "species":
-            _names = names().query(
-                f"{is_bac_id} & (name_class in @name_classes)"
-            )
-            # For species names, we also remove citations before normalizing
-            _names["norm"] = _names["name_txt"].apply(
-                lambda n: normalize(remove_citations(n))
-            )
-            desc = "Bacterial species names"
-        elif rank == "genus":
-            _names = names().query(
-                "tax_id in @bac_genus_nodes['tax_id'].values"
-            )
-            _names["norm"] = _names["name_txt"].apply(
-                lambda n: normalize(remove_citations(n))
-            )
-            desc = "Bacterial genus names"
-        elif rank == "strain":
-            strain_nodes = nodes().query("division_id == 0 & rank == 'strain'")
-            type_material = f"{is_bac_id} & name_class == 'type material'"
-            is_strain_id = "tax_id in @strain_nodes['tax_id'].values"
-            strain_node_cond = f"{is_strain_id} & name_class in @name_classes"
-
-            _names = names().query(f"({type_material}) | ({strain_node_cond})")
-            _names["norm"] = _names["name_txt"].apply(normalize)
-            desc = "Bacterial strain names"
-
-        scinames = dict(
-            _names.query("name_class == 'scientific name'")[
-                ["tax_id", "name_txt"]
-            ].values
+        desc = "Bacterial species names"
+    elif rank == "genus":
+        _names = names().query("tax_id in @bac_genus_nodes['tax_id'].values")
+        _names["norm"] = _names["name_txt"].apply(
+            lambda n: normalize(remove_citations(n))
         )
+        desc = "Bacterial genus names"
+    elif rank == "strain":
+        strain_nodes = nodes().query("division_id == 0 & rank == 'strain'")
+        type_material = f"{is_bac_id} & name_class == 'type material'"
+        is_strain_id = "tax_id in @strain_nodes['tax_id'].values"
+        strain_node_cond = f"{is_strain_id} & name_class in @name_classes"
 
-        index = {
-            row.norm: (scinames.get(row.tax_id, row.name_txt), row.tax_id)
-            for row in tqdm(
-                _names.itertuples(index=False),
-                total=len(_names),
-                desc=desc,
-            )
-        }
+        _names = names().query(f"({type_material}) | ({strain_node_cond})")
+        _names["norm"] = _names["name_txt"].apply(normalize)
+        desc = "Bacterial strain names"
+
+    scinames = dict(
+        _names.query("name_class == 'scientific name'")[
+            ["tax_id", "name_txt"]
+        ].values
+    )
+
+    index = {
+        row.norm: (scinames.get(row.tax_id, row.name_txt), row.tax_id)
+        for row in tqdm(
+            _names.itertuples(index=False),
+            total=len(_names),
+            desc=desc,
+        )
+    }
 
     save_index(index=index, path=index_cache_path)
 
@@ -324,6 +318,8 @@ def get_rank(query: str) -> str | None:
     if node is not None:
         return node["rank"]
 
+    return None
+
 
 def is_bacterial_strain(query: str) -> bool:
     """Determine whether the query refers to a bacterial strain.
@@ -365,6 +361,15 @@ def _names_by_tax_id() -> DataFrameGroupBy:
     return names().groupby("tax_id")
 
 
+def get_name_txt(tax_id: int, name_class: str) -> str | None:
+    """Get name of `name_class` type for `tax_id."""
+    nodes_indexed = _nodes_indexed()  # cached
+    names_by_taxid = _names_by_tax_id()  # cached
+    group = names_by_taxid.get_group(tax_id)
+    match = group[group["name_class"] == name_class]
+    return match["name_txt"].iloc[0] if not match.empty else None
+
+
 @cache
 def decompose_name(query: str) -> DecomposedName | None:
     """Return the species name and the strain identifier from `query`."""
@@ -375,9 +380,7 @@ def decompose_name(query: str) -> DecomposedName | None:
 
     if node is None:
         query_parts = query.split()[:-1]
-        if not query_parts:
-            return None
-        if query_parts[-1] == "sp.":
+        if query_parts and query_parts[-1] == "sp.":
             node = get_node(query_parts[0])
             if node is not None and node["rank"] == "genus":
                 return DecomposedName(species=query, strain=None)
@@ -390,11 +393,6 @@ def decompose_name(query: str) -> DecomposedName | None:
     nodes_indexed = _nodes_indexed()  # cached
     names_by_taxid = _names_by_tax_id()  # cached
 
-    def get_name_txt(tax_id: int, name_class: str) -> str | None:
-        group = names_by_taxid.get_group(tax_id)
-        match = group[group["name_class"] == name_class]
-        return match["name_txt"].iloc[0] if not match.empty else None
-
     current_id = node["tax_id"]
     # Check if `node` is a type strain
 
@@ -405,12 +403,12 @@ def decompose_name(query: str) -> DecomposedName | None:
             row = exact_match.iloc[0]
             if row["name_class"] == "type material":
                 return DecomposedName(species=None, strain=query)
-            elif node["rank"] == "species":
+            if node["rank"] == "species":
                 return DecomposedName(species=query, strain=None)
     except IndexError:
-        # Get the lineage by walking up the taxonomy tree until we hit species rank
         pass
 
+    # Get the lineage by walking up the taxonomy tree until we hit species rank
     while True:
         try:
             current_node = nodes_indexed.loc[current_id]
