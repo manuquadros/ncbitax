@@ -135,6 +135,7 @@ def column_info(table: str) -> dict[str, str]:
             return {}
 
 
+@cache
 def load_df(table: str) -> pd.DataFrame:
     if table[-4:] == ".dmp":
         table = table[:-4]
@@ -368,8 +369,8 @@ def decompose_name(query: str) -> DecomposedName | None:
 
         return decompose_name(" ".join(query_parts))
 
-    nodes = load_df("nodes")
-    names = load_df("names")
+    nodes = load_df("nodes")  # cached
+    names = load_df("names")  # cached
 
     if node["rank"] not in ("strain", "species"):
         return None
