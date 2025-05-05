@@ -214,6 +214,7 @@ def bacterial_name_index(rank: str) -> NameIndex:
     _cache_paths = {
         "species": ROOTDIR / "resources/bacteria_name_index.pickle",
         "strain": ROOTDIR / "resources/strain_name_index.pickle",
+        "genus": ROOTDIR / "resources/genus_name_index.pickle",
     }
     index_cache_path = _cache_paths[rank]
     index = get_index(index_cache_path)
@@ -222,6 +223,7 @@ def bacterial_name_index(rank: str) -> NameIndex:
         return index
     else:
         bacnodes = nodes().query("division_id == 0 & rank == 'species'")
+        bac_genus_nodes = nodes().query("division_id == 0 & rank == 'genus'")
         name_classes = (
             "synonym",
             "scientific name",
@@ -240,6 +242,14 @@ def bacterial_name_index(rank: str) -> NameIndex:
                 lambda n: normalize(remove_citations(n))
             )
             desc = "Bacterial species names"
+        elif rank == "genus":
+            _names = names().query(
+                "tax_id in @bac_genus_nodes['tax_id'].values"
+            )
+            _names["norm"] = _names["name_txt"].apply(
+                lambda n: normalize(remove_citations(n))
+            )
+            desc = "Bacterial genus names"
         elif rank == "strain":
             strain_nodes = nodes().query("division_id == 0 & rank == 'strain'")
             type_material = f"{is_bac_id} & name_class == 'type material'"
@@ -277,11 +287,16 @@ def resolve_tax_id(query: str) -> int | None:
     :return: tax_id or None
     """
     normed = normalize(query)
-    result = bacterial_name_index("species").get(
-        normed
-    ) or bacterial_name_index("strain").get(normed)
+    result = (
+        bacterial_name_index("species").get(normed)
+        or bacterial_name_index("strain").get(normed)
+        or bacterial_name_index("genus").get(normed)
+    )
+
     if result:
         return result[1]
+
+    return None
 
 
 @lru_cache
