@@ -358,7 +358,15 @@ def decompose_name(query: str) -> DecomposedName | None:
     node = get_node(query)
 
     if node is None:
-        return decompose_name(" ".join(query.split()[:-1]))
+        query_parts = query.split()[:-1]
+        if not query_parts:
+            return None
+        if query_parts[-1] == "sp.":
+            node = get_node(query_parts[0])
+            if node is not None and node["rank"] == "genus":
+                return DecomposedName(species=query, strain=None)
+
+        return decompose_name(" ".join(query_parts))
 
     nodes = load_df("nodes")
     names = load_df("names")
