@@ -12,6 +12,7 @@ from io import TextIOBase, TextIOWrapper
 from tqdm import tqdm
 
 import pandas as pd
+from pandas.api.typing import DataFrameGroupBy
 
 ROOTDIR = pathlib.Path(__file__).parent.parent.parent.parent
 taxdump = ROOTDIR / "resources/taxdump.tar.gz"
@@ -351,6 +352,17 @@ class DecomposedName:
     strain: str | None
 
 
+@cache
+def _nodes_indexed() -> pd.DataFrame:
+    return nodes().set_index("tax_id")
+
+
+@cache
+def _names_by_tax_id() -> DataFrameGroupBy:
+    return names().groupby("tax_id")
+
+
+@cache
 def decompose_name(query: str) -> DecomposedName | None:
     """Return the species name and the strain identifier from `query`."""
     if not query:
@@ -369,47 +381,50 @@ def decompose_name(query: str) -> DecomposedName | None:
 
         return decompose_name(" ".join(query_parts))
 
-    nodes = load_df("nodes")  # cached
-    names = load_df("names")  # cached
-
     if node["rank"] not in ("strain", "species"):
         return None
+
+    nodes_indexed = _nodes_indexed()  # cached
+    names_by_taxid = _names_by_tax_id()  # cached
+
+    def get_name_txt(tax_id: int, name_class: str) -> str | None:
+        group = names_by_taxid.get_group(tax_id)
+        match = group[group["name_class"] == name_class]
+        return match["name_txt"].iloc[0] if not match.empty else None
 
     current_id = node["tax_id"]
     # Check if `node` is a type strain
 
     try:
-        exact_match = names[
-            (names["tax_id"] == current_id) & (names["name_txt"] == query)
-        ].iloc[0]
-        if exact_match["name_class"] == "type material":
-            return DecomposedName(species=None, strain=query)
-        elif node["rank"] == "species":
-            return DecomposedName(species=query, strain=None)
+        matches = names_by_taxid.get_group(current_id)
+        exact_match = matches[matches["name_txt"] == query]
+        if not exact_match.empty:
+            row = exact_match.iloc[0]
+            if row["name_class"] == "type material":
+                return DecomposedName(species=None, strain=query)
+            elif node["rank"] == "species":
+                return DecomposedName(species=query, strain=None)
     except IndexError:
         # Get the lineage by walking up the taxonomy tree until we hit species rank
         pass
 
     while True:
-        current_node = nodes[nodes["tax_id"] == current_id].iloc[0]
+        try:
+            current_node = nodes_indexed.loc[current_id]
+        except KeyError:
+            return None
+
         if current_node["rank"] == "species":
-            # Found the species, get its name
-            species_name = names[
-                (names["tax_id"] == current_id)
-                & (names["name_class"] == "scientific name")
-            ]["name_txt"].iloc[0]
+            species_name = get_name_txt(current_id, "scientific name")
+            strain_name = get_name_txt(node["tax_id"], "scientific name")
 
-            # Get the strain name
-            strain_name = names[
-                (names["tax_id"] == node["tax_id"])
-                & (names["name_class"] == "scientific name")
-            ]["name_txt"].iloc[0]
-            strain_name = strain_name.replace(species_name, "").strip() or None
+            if species_name and strain_name:
+                strain_clean = (
+                    strain_name.replace(species_name, "").strip() or None
+                )
+                return DecomposedName(species=species_name, strain=strain_clean)
 
-            return DecomposedName(
-                species=species_name,
-                strain=strain_name,
-            )
+            return None
 
         current_id = current_node["parent_tax_id"]
         if current_id == 1:  # Hit root without finding species
