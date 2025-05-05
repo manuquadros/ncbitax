@@ -35,11 +35,10 @@ while True:
 class NCBIDump(TextIOBase):
     def __init__(self, table: str, sep=","):
         if table[:-4] != ".dmp":
-            table = table + ".dmp"
+            self._table = table + ".dmp"
+        else:
+            self._table = table
 
-        self._file = TextIOWrapper(
-            tarfile.open(taxdump).extractfile(table), encoding="utf-8"
-        )
         self._delimiter = r"\t\|\t|\t\|\n"
         self._unquoted_field = re.compile(
             rf"([^\t]*,[^\t]*)(?={self._delimiter})"
@@ -60,9 +59,13 @@ class NCBIDump(TextIOBase):
             return ""
 
     def __enter__(self):
+        self._tar = tarfile.open(taxdump)
+        tbl = self._tar.extractfile(self._table)
+        self._file = TextIOWrapper(tbl, encoding="utf-8")
         return self
 
     def __exit__(self, type, value, traceback):
+        self._tar.close()
         self._file.close()
 
 

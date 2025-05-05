@@ -1,6 +1,8 @@
 import pandas as pd
 from .ncbitax import (
     decompose_name,
+    names,
+    nodes,
     resolve_tax_id,
     is_bacteria,
     is_bacterial_strain,
@@ -9,6 +11,8 @@ from .ncbitax import (
 
 __all__ = [
     "decompose_name",
+    "names",
+    "nodes",
     "resolve_tax_id",
     "is_bacteria",
     "is_bacterial_strain",
