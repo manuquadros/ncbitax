@@ -1,17 +1,12 @@
 [project]
 name = "ncbitax"
 version = "0.1.0"
-description = "Add your description here"
+description = "Utilities to navigate NCBI taxonomy dump files"
 readme = "README.md"
-authors = [
-    { name = "Emanuel Quadros", email = "emanuel.quadros@dsmz.de" }
-]
+authors = [{ name = "Emanuel Quadros", email = "emanuel.quadros@dsmz.de" }]
 requires-python = ">=3.12, <4"
-dependencies = [
-    "pandas>=2.2.3",
-    "pyarrow>=19.0.1",
-    "tqdm>=4.67.1",
-]
+license = "GPL-3.0-or-later"
+dependencies = ["pandas>=2.2.3", "pyarrow>=19.0.1", "tqdm>=4.67.1"]
 
 [build-system]
 requires = ["hatchling"]
@@ -20,8 +15,9 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/taxonomy"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"data" = "ncbitax/resources"
+
 [tool.pytest.ini_options]
-addopts = [
-  "--import-mode=importlib",
-]
+addopts = ["--import-mode=importlib"]
 pythonpath = "src"
