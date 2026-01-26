@@ -1,12 +1,13 @@
 import pandas as pd
+
 from .ncbitax import (
+    DecomposedName,
     decompose_name,
+    is_bacteria,
+    is_bacterial_strain,
     names,
     nodes,
     resolve_tax_id,
-    is_bacteria,
-    is_bacterial_strain,
-    DecomposedName,
 )
 
 __all__ = [
@@ -18,5 +19,3 @@ __all__ = [
     "is_bacterial_strain",
     "DecomposedName",
 ]
-
-pd.options.mode.copy_on_write = True
