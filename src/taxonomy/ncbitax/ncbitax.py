@@ -225,8 +225,8 @@ def bacterial_name_index(rank: str) -> NameIndex:
     if index:
         return index
 
-    bacnodes = nodes().query("division_id == 0 & rank == 'species'")
-    bac_genus_nodes = nodes().query("division_id == 0 & rank == 'genus'")
+    bacnodes = nodes().query("division_id == 0 & rank == 'species'", engine="python")
+    bac_genus_nodes = nodes().query("division_id == 0 & rank == 'genus'", engine="python")
     name_classes = (
         "synonym",
         "scientific name",
@@ -237,30 +237,30 @@ def bacterial_name_index(rank: str) -> NameIndex:
     is_bac_id = "(tax_id in @bacnodes['tax_id'].values)"
 
     if rank == "species":
-        _names = names().query(f"{is_bac_id} & (name_class in @name_classes)")
+        _names = names().query(f"{is_bac_id} & (name_class in @name_classes)", engine="python")
         # For species names, we also remove citations before normalizing
         _names["norm"] = _names["name_txt"].apply(
             lambda n: normalize(remove_citations(n))
         )
         desc = "Bacterial species names"
     elif rank == "genus":
-        _names = names().query("tax_id in @bac_genus_nodes['tax_id'].values")
+        _names = names().query("tax_id in @bac_genus_nodes['tax_id'].values", engine="python")
         _names["norm"] = _names["name_txt"].apply(
             lambda n: normalize(remove_citations(n))
         )
         desc = "Bacterial genus names"
     elif rank == "strain":
-        strain_nodes = nodes().query("division_id == 0 & rank == 'strain'")
+        strain_nodes = nodes().query("division_id == 0 & rank == 'strain'", engine="python")
         type_material = f"{is_bac_id} & name_class == 'type material'"
         is_strain_id = "tax_id in @strain_nodes['tax_id'].values"
         strain_node_cond = f"{is_strain_id} & name_class in @name_classes"
 
-        _names = names().query(f"({type_material}) | ({strain_node_cond})")
+        _names = names().query(f"({type_material}) | ({strain_node_cond})", engine="python")
         _names["norm"] = _names["name_txt"].apply(normalize)
         desc = "Bacterial strain names"
 
     scinames = dict(
-        _names.query("name_class == 'scientific name'")[
+        _names.query("name_class == 'scientific name'", engine="python")[
             ["tax_id", "name_txt"]
         ].values
     )
