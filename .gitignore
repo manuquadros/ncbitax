@@ -155,4 +155,6 @@ dmypy.json
 # Cython debug symbols
 cython_debug/
 
-.zst
+# Caches ncbitax derives from resources/taxdump.tar.gz
+*.zst
+resources/*.pickle

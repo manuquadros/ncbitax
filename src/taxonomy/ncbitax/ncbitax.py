@@ -5,6 +5,8 @@ import pickle
 import re
 import sys
 import tarfile
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from functools import cache, lru_cache
 from io import TextIOBase, TextIOWrapper
@@ -14,9 +16,113 @@ import pandas as pd
 from pandas.api.typing import DataFrameGroupBy
 
 ROOTDIR = pathlib.Path(__file__).parent.parent.parent.parent
-taxdump = ROOTDIR / "resources/taxdump.tar.gz"
-NAMEINDEX_CACHE_PATH = ROOTDIR / "resources/name_index.pickle"
-NAMES_PARQUET_PATH = ROOTDIR / "resources/names.parquet.zst"
+
+TAXDUMP_URL = "https://ftp.ncbi.nlm.nih.gov/pub/taxonomy/taxdump.tar.gz"
+
+
+class TaxdumpNotFoundError(FileNotFoundError):
+    """Raised when the NCBI taxonomy dump is neither present nor obtainable."""
+
+
+def _in_source_checkout() -> bool:
+    """Whether the module is being imported from a source tree.
+
+    True for a git checkout and for an editable install, both of which keep
+    ``__file__`` inside ``src/taxonomy/ncbitax``. False for a wheel install,
+    where ``ROOTDIR`` lands on an unrelated directory such as
+    ``lib/python3.12``.
+    """
+    return (ROOTDIR / "pyproject.toml").is_file() and (
+        ROOTDIR / "src" / "taxonomy"
+    ).is_dir()
+
+
+def _resolve_data_dir() -> pathlib.Path:
+    """Locate the directory holding the taxonomy dump and its derived caches.
+
+    Resolution order: ``$NCBITAX_DATA_DIR``, then ``resources/`` of the source
+    checkout, then a user cache directory. The dump and the parquet/pickle
+    caches built from it total well over 200 MB, so they are never shipped in
+    the wheel and never written into the installed package.
+    """
+    if env_dir := os.environ.get("NCBITAX_DATA_DIR"):
+        return pathlib.Path(env_dir).expanduser()
+
+    if _in_source_checkout():
+        return ROOTDIR / "resources"
+
+    cache_home = os.environ.get("XDG_CACHE_HOME") or "~/.cache"
+    return pathlib.Path(cache_home).expanduser() / "ncbitax"
+
+
+DATA_DIR = _resolve_data_dir()
+taxdump = DATA_DIR / "taxdump.tar.gz"
+NAMEINDEX_CACHE_PATH = DATA_DIR / "name_index.pickle"
+NAMES_PARQUET_PATH = DATA_DIR / "names.parquet.zst"
+
+
+def _auto_download_enabled() -> bool:
+    disabled = {"0", "false", "no", "off"}
+    return (
+        os.environ.get("NCBITAX_AUTO_DOWNLOAD", "1").strip().lower()
+        not in disabled
+    )
+
+
+def download_taxdump(dest: pathlib.Path | None = None) -> pathlib.Path:
+    """Fetch ``taxdump.tar.gz`` from the NCBI FTP server into `dest`.
+
+    The download goes to a temporary sibling file that is renamed into place
+    only once complete, so an interrupted transfer never leaves a truncated
+    archive behind for the next run to choke on.
+    """
+    dest = taxdump if dest is None else dest
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    partial = dest.with_name(dest.name + ".part")
+
+    try:
+        with urllib.request.urlopen(TAXDUMP_URL) as response:
+            total = int(response.headers.get("Content-Length") or 0)
+            with (
+                partial.open("wb") as out,
+                tqdm(
+                    total=total or None,
+                    unit="B",
+                    unit_scale=True,
+                    unit_divisor=1024,
+                    desc="Downloading taxdump",
+                ) as progress,
+            ):
+                while chunk := response.read(1 << 20):
+                    out.write(chunk)
+                    progress.update(len(chunk))
+    except (urllib.error.URLError, OSError) as err:
+        partial.unlink(missing_ok=True)
+        raise TaxdumpNotFoundError(
+            f"Could not download the NCBI taxonomy dump from {TAXDUMP_URL}: "
+            f"{err}. Download it manually and place it at {dest}, or point "
+            f"NCBITAX_DATA_DIR at a directory that already contains it."
+        ) from err
+
+    partial.replace(dest)
+    return dest
+
+
+def taxdump_path() -> pathlib.Path:
+    """Return the path to ``taxdump.tar.gz``, downloading it on first use."""
+    if taxdump.exists():
+        return taxdump
+
+    if _auto_download_enabled():
+        return download_taxdump(taxdump)
+
+    raise TaxdumpNotFoundError(
+        f"No NCBI taxonomy dump at {taxdump}, and automatic download is "
+        "disabled by NCBITAX_AUTO_DOWNLOAD. Fetch it from "
+        f"{TAXDUMP_URL} and place it there, or set NCBITAX_DATA_DIR to a "
+        "directory that already contains it."
+    )
+
 
 # Increase CSV field size limit to maximum possible to account for long lists
 # of tax_id's in rows of the citations table.
@@ -57,7 +163,7 @@ class NCBIDump(TextIOBase):
         return ""
 
     def __enter__(self):
-        self._tar = tarfile.open(taxdump)
+        self._tar = tarfile.open(taxdump_path())
         tbl = self._tar.extractfile(self._table)
         self._file = TextIOWrapper(tbl, encoding="utf-8")
         return self
@@ -142,26 +248,25 @@ def load_df(table: str) -> pd.DataFrame:
     if table[-4:] == ".dmp":
         table = table[:-4]
 
-    filepath = ROOTDIR / f"resources/{table}.parquet.zst"
+    filepath = DATA_DIR / f"{table}.parquet.zst"
 
-    try:
+    if filepath.exists():
         return pd.read_parquet(filepath, engine="pyarrow")
-    except FileNotFoundError:
-        colinfo = column_info(table)
-        with NCBIDump(table) as stream:
-            df = pd.read_csv(
-                stream,
-                engine="python",
-                header=None,
-                escapechar="\\",
-                names=colinfo.keys(),
-                dtype=colinfo,
-            )
 
-        df.to_parquet(
-            filepath, engine="pyarrow", compression="zstd", index=False
+    colinfo = column_info(table)
+    with NCBIDump(table) as stream:
+        df = pd.read_csv(
+            stream,
+            engine="python",
+            header=None,
+            escapechar="\\",
+            names=colinfo.keys(),
+            dtype=colinfo,
         )
-        return df
+
+    filepath.parent.mkdir(parents=True, exist_ok=True)
+    df.to_parquet(filepath, engine="pyarrow", compression="zstd", index=False)
+    return df
 
 
 def remove_citations(name: str) -> str:
@@ -192,12 +297,10 @@ type NameIndex = dict[str, tuple[str, int]]
 
 
 def source_mtime() -> float:
-    NAMES_PARQUET_PATH = ROOTDIR / "resources/names.parquet.zst"
-
     return NAMES_PARQUET_PATH.stat().st_mtime
 
 
-def get_index(index_file: os.PathLike) -> NameIndex:
+def get_index(index_file: pathlib.Path) -> NameIndex:
     if index_file.exists():
         with open(index_file, "rb") as f:
             cache = pickle.load(f)
@@ -207,7 +310,8 @@ def get_index(index_file: os.PathLike) -> NameIndex:
     return {}
 
 
-def save_index(index: NameIndex, path: os.PathLike) -> None:
+def save_index(index: NameIndex, path: pathlib.Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
     with path.open(mode="wb") as f:
         pickle.dump({"mtime": source_mtime(), "data": index}, f)
 
@@ -215,9 +319,9 @@ def save_index(index: NameIndex, path: os.PathLike) -> None:
 @cache
 def bacterial_name_index(rank: str) -> NameIndex:
     _cache_paths = {
-        "species": ROOTDIR / "resources/bacteria_name_index.pickle",
-        "strain": ROOTDIR / "resources/strain_name_index.pickle",
-        "genus": ROOTDIR / "resources/genus_name_index.pickle",
+        "species": DATA_DIR / "bacteria_name_index.pickle",
+        "strain": DATA_DIR / "strain_name_index.pickle",
+        "genus": DATA_DIR / "genus_name_index.pickle",
     }
     index_cache_path = _cache_paths[rank]
     index = get_index(index_cache_path)
