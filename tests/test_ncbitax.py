@@ -1,3 +1,10 @@
+import io
+import os
+import pathlib
+import tarfile
+
+import pytest
+
 from taxonomy.ncbitax import (
     resolve_tax_id,
     is_bacteria,
@@ -52,6 +59,7 @@ def test_index_cache_misses_when_the_code_that_built_it_changes(
     parquet = tmp_path / "names.parquet.zst"
     parquet.touch()
     monkeypatch.setattr(ncbitax, "NAMES_PARQUET_PATH", parquet)
+    monkeypatch.setattr(ncbitax, "taxdump", tmp_path / "taxdump.tar.gz")
 
     index_file = tmp_path / "bacteria_name_index.pickle"
     index = {"escherichiacoli": ("Escherichia coli", 562)}
@@ -65,3 +73,210 @@ def test_index_cache_misses_when_the_code_that_built_it_changes(
     monkeypatch.setattr(ncbitax, "normalize", normalize)
 
     assert ncbitax.get_index(index_file) == {}
+
+
+def test_index_cache_misses_when_the_parser_of_its_input_changes(
+    tmp_path, monkeypatch
+):
+    """An index is served only while the parser of its frames stands too.
+
+    A changed column_info reshapes names.parquet.zst without moving any mtime
+    the pickle stores, so only a build id can catch it.
+    """
+    parquet = tmp_path / "names.parquet.zst"
+    parquet.touch()
+    monkeypatch.setattr(ncbitax, "NAMES_PARQUET_PATH", parquet)
+    monkeypatch.setattr(ncbitax, "taxdump", tmp_path / "taxdump.tar.gz")
+
+    index_file = tmp_path / "bacteria_name_index.pickle"
+    index = {"escherichiacoli": ("Escherichia coli", 562)}
+    ncbitax.save_index(index=index, path=index_file)
+
+    assert ncbitax.get_index(index_file) == index
+
+    def column_info(table: str) -> dict[str, str]:
+        return {"tax_id": "UInt32"}
+
+    monkeypatch.setattr(ncbitax, "column_info", column_info)
+
+    assert ncbitax.get_index(index_file) == {}
+
+
+def clear_memos() -> None:
+    """Drop every memo that could hold a frame or an index across a rebuild."""
+    for memoized in (
+        ncbitax.load_df,
+        ncbitax.bacterial_name_index,
+        ncbitax.get_node,
+        ncbitax.decompose_name,
+        ncbitax._nodes_indexed,
+        ncbitax._names_by_tax_id,
+    ):
+        memoized.cache_clear()
+
+
+@pytest.fixture
+def data_dir(tmp_path, monkeypatch):
+    """A scratch data directory, with the memos cleared either side of it.
+
+    The memos are global and keyed on a table name or a rank alone, so a frame
+    or an index read out of `tmp_path` would otherwise outlive the test that
+    asked for it.
+    """
+    monkeypatch.setattr(ncbitax, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(ncbitax, "taxdump", tmp_path / "taxdump.tar.gz")
+    monkeypatch.setattr(
+        ncbitax, "NAMES_PARQUET_PATH", tmp_path / "names.parquet.zst"
+    )
+    monkeypatch.setenv("NCBITAX_AUTO_DOWNLOAD", "0")
+
+    clear_memos()
+    yield tmp_path
+    clear_memos()
+
+
+def write_dump(path: pathlib.Path, **tables: list[tuple[str, ...]]) -> None:
+    """Write a taxdump archive holding one `.dmp` member per named table."""
+    with tarfile.open(path, "w:gz") as tar:
+        for table, rows in tables.items():
+            body = "".join("\t|\t".join(row) + "\t|\n" for row in rows).encode()
+            info = tarfile.TarInfo(f"{table}.dmp")
+            info.size = len(body)
+            tar.addfile(info, io.BytesIO(body))
+
+
+def bacterial_species(tax_id: str) -> tuple[str, ...]:
+    """A nodes.dmp row for a species of the bacterial division.
+
+    Only tax_id, rank and division_id decide what an index holds; the eight
+    columns after them just have to be there and parse.
+    """
+    rest = ("0", "11", "1", "0", "1", "0", "0", "")
+    return (tax_id, "1", "species", "", "0") + rest
+
+
+def scientific_name(tax_id: str, name: str) -> tuple[str, ...]:
+    """A names.dmp row carrying a scientific name."""
+    return (tax_id, name, "", "scientific name")
+
+
+def make_newest(path: pathlib.Path) -> None:
+    """Stamp `path` a second past every file beside it.
+
+    A dump replaced within the same second as the caches it invalidates would
+    otherwise read as no newer than they are.
+    """
+    newest = max(sibling.stat().st_mtime for sibling in path.parent.iterdir())
+    os.utime(path, (newest + 1, newest + 1))
+
+
+def test_parquet_rebuilt_when_the_dump_is_newer(data_dir):
+    """A dump replaced under a warm parquet reaches the data."""
+    dump = data_dir / "taxdump.tar.gz"
+    write_dump(dump, division=[("0", "BCT", "Bacteria", "")])
+    assert ncbitax.load_df("division")["division_name"][0] == "Bacteria"
+
+    write_dump(dump, division=[("0", "BCT", "Archaea", "")])
+    make_newest(dump)
+
+    clear_memos()
+    assert ncbitax.load_df("division")["division_name"][0] == "Archaea"
+
+
+def test_parquet_rebuilt_when_the_code_that_built_it_changes(
+    data_dir, monkeypatch
+):
+    """A parquet is served only while the parser that shaped it stands."""
+    write_dump(
+        data_dir / "taxdump.tar.gz", division=[("0", "BCT", "Bacteria", "")]
+    )
+    assert list(ncbitax.load_df("division").columns) == [
+        "division_id",
+        "division_cde",
+        "division_name",
+        "comments",
+    ]
+
+    def column_info(table: str) -> dict[str, str]:
+        return {
+            "id": "UInt8",
+            "cde": "string",
+            "label": "string",
+            "x": "string",
+        }
+
+    monkeypatch.setattr(ncbitax, "column_info", column_info)
+
+    clear_memos()
+    assert list(ncbitax.load_df("division").columns) == [
+        "id",
+        "cde",
+        "label",
+        "x",
+    ]
+
+
+def test_parquet_is_served_when_the_dump_is_gone(data_dir):
+    """A data directory holding only parquets must not re-fetch the dump."""
+    dump = data_dir / "taxdump.tar.gz"
+    write_dump(dump, division=[("0", "BCT", "Bacteria", "")])
+    ncbitax.load_df("division")
+    dump.unlink()
+
+    clear_memos()
+    assert ncbitax.load_df("division")["division_name"][0] == "Bacteria"
+
+
+def test_name_index_rebuilt_when_the_dump_is_newer(data_dir):
+    """A dump replaced under warm caches reaches resolve_tax_id().
+
+    bacterial_name_index reads its pickle before anything reads a parquet, so
+    a freshness check confined to load_df never runs on this path.
+    """
+    dump = data_dir / "taxdump.tar.gz"
+    write_dump(
+        dump,
+        nodes=[bacterial_species("1001")],
+        names=[scientific_name("1001", "Escherichia coli")],
+    )
+    assert resolve_tax_id("Escherichia coli") == 1001
+
+    write_dump(
+        dump,
+        nodes=[bacterial_species("1001"), bacterial_species("2002")],
+        names=[
+            scientific_name("1001", "Escherichia coli"),
+            scientific_name("2002", "Bacillus subtilis"),
+        ],
+    )
+    make_newest(dump)
+
+    clear_memos()
+    assert resolve_tax_id("Bacillus subtilis") == 2002
+
+
+def test_lookups_agree_after_a_taxon_is_reissued(data_dir):
+    """Name index and node frame answer for the same dump, or neither does.
+
+    A tax_id retired and re-issued between dumps is where a half-refreshed
+    chain shows: the stale index resolves to the retired id, the fresh frame
+    has no row for it, and the answer comes from neither dump.
+    """
+    dump = data_dir / "taxdump.tar.gz"
+    write_dump(
+        dump,
+        nodes=[bacterial_species("1001")],
+        names=[scientific_name("1001", "Escherichia coli")],
+    )
+    assert is_bacteria("Escherichia coli")
+
+    write_dump(
+        dump,
+        nodes=[bacterial_species("2002")],
+        names=[scientific_name("2002", "Escherichia coli")],
+    )
+    make_newest(dump)
+
+    clear_memos()
+    assert resolve_tax_id("Escherichia coli") == 2002
+    assert is_bacteria("Escherichia coli")

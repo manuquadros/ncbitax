@@ -15,6 +15,8 @@ from io import TextIOBase, TextIOWrapper
 from tqdm import tqdm
 
 import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
 from pandas.api.typing import DataFrameGroupBy
 
 ROOTDIR = pathlib.Path(__file__).parent.parent.parent.parent
@@ -245,6 +247,41 @@ def column_info(table: str) -> dict[str, str]:
             return {}
 
 
+_PARQUET_BUILD_ID_KEY = b"ncbitax_build_id"
+
+
+def _parquet_build_id() -> str:
+    """Fingerprint of the code that turns a table of the dump into a parquet.
+
+    Hashing the source spares anyone having to remember a version bump, at the
+    cost of a rebuild when a comment inside one of these moves -- the cheap
+    direction to be wrong in, and the trade the name indexes already make.
+    """
+    source = "".join(
+        inspect.getsource(obj) for obj in (column_info, NCBIDump, load_df)
+    )
+    return hashlib.sha256(source.encode()).hexdigest()
+
+
+def _parquet_is_current(filepath: pathlib.Path) -> bool:
+    """Whether a cached parquet still answers for the dump and the parser.
+
+    The dump is compared by mtime, since ``download_taxdump`` renames a fresh
+    archive into place; a dump that is absent cannot be compared against, and
+    the parquet is then the only copy of that data there is. The parser is
+    compared through a build id stamped into the parquet's own footer, so one
+    written before the stamp existed carries none and is a miss.
+    """
+    if not filepath.exists():
+        return False
+
+    if taxdump.exists() and filepath.stat().st_mtime < taxdump.stat().st_mtime:
+        return False
+
+    metadata = pq.read_schema(filepath).metadata or {}
+    return metadata.get(_PARQUET_BUILD_ID_KEY) == _parquet_build_id().encode()
+
+
 @cache
 def load_df(table: str) -> pd.DataFrame:
     if table[-4:] == ".dmp":
@@ -252,7 +289,7 @@ def load_df(table: str) -> pd.DataFrame:
 
     filepath = DATA_DIR / f"{table}.parquet.zst"
 
-    if filepath.exists():
+    if _parquet_is_current(filepath):
         return pd.read_parquet(filepath, engine="pyarrow")
 
     colinfo = column_info(table)
@@ -267,7 +304,14 @@ def load_df(table: str) -> pd.DataFrame:
         )
 
     filepath.parent.mkdir(parents=True, exist_ok=True)
-    df.to_parquet(filepath, engine="pyarrow", compression="zstd", index=False)
+    arrow_table = pa.Table.from_pandas(df, preserve_index=False)
+    metadata = dict(arrow_table.schema.metadata or {})
+    metadata[_PARQUET_BUILD_ID_KEY] = _parquet_build_id().encode()
+    pq.write_table(
+        arrow_table.replace_schema_metadata(metadata),
+        filepath,
+        compression="zstd",
+    )
     return df
 
 
@@ -299,7 +343,19 @@ type NameIndex = dict[str, tuple[str, int]]
 
 
 def source_mtime() -> float:
-    return NAMES_PARQUET_PATH.stat().st_mtime
+    """Mtime of the newest data a name index is derived from.
+
+    The dump counts even though an index is built out of the parquets: a
+    parquet older than the dump is rebuilt from it before the index is, so an
+    index keyed on the parquet alone would go on answering for a dump that has
+    already been replaced. A dump that is absent cannot be compared against.
+    """
+    parquet_mtime = NAMES_PARQUET_PATH.stat().st_mtime
+
+    if taxdump.exists():
+        return max(parquet_mtime, taxdump.stat().st_mtime)
+
+    return parquet_mtime
 
 
 def _index_build_id() -> str:
@@ -308,13 +364,15 @@ def _index_build_id() -> str:
     Hashing the source means nobody has to remember to bump a version, at the
     cost of a rebuild when a comment inside one of these functions changes --
     the cheap direction to be wrong in. Reading the source needs the ``.py``
-    files, which both a checkout and the wheel ship.
+    files, which both a checkout and the wheel ship. The parquet build id is
+    folded in because an index is built out of the frames that id covers, so a
+    reshaped frame has to expire the index too.
     """
     source = "".join(
         inspect.getsource(fn)
         for fn in (normalize, remove_citations, bacterial_name_index)
     )
-    return hashlib.sha256(source.encode()).hexdigest()
+    return hashlib.sha256((_parquet_build_id() + source).encode()).hexdigest()
 
 
 def get_index(index_file: pathlib.Path) -> NameIndex:

@@ -32,4 +32,10 @@ from taxonomy.ncbitax import download_taxdump
 download_taxdump()
 ```
 
+Both cache layers are checked on use against the dump's timestamp and against
+a fingerprint of the code that derives them, so replacing `taxdump.tar.gz` --
+which `download_taxdump()` does -- is enough on its own: the parquets and the
+name indexes are rebuilt on the next lookup, and nothing has to be deleted by
+hand. A full rebuild takes about a minute.
+
 `taxonomy.ncbitax.DATA_DIR` reports the resolved directory.

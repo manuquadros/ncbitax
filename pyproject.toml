@@ -32,7 +32,7 @@ line-length = 80
 [tool.mypy]
 
 [[tool.mypy.overrides]]
-module = ["pandas.*"]
+module = ["pandas.*", "pyarrow.*"]
 ignore_missing_imports = true
 
 [dependency-groups]
