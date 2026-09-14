@@ -1,6 +1,6 @@
 [project]
 name = "ncbitax"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Utilities to navigate NCBI taxonomy dump files"
 readme = "README.md"
 authors = [{ name = "Emanuel Quadros", email = "emanuel.quadros@dsmz.de" }]
@@ -13,8 +13,11 @@ dependencies = [
 ]
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "vcs"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/taxonomy"]
