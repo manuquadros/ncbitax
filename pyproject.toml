@@ -41,4 +41,9 @@ dev = [
     "ruff==0.8.6",
     "mypy>=1.11",
     "types-tqdm>=4.66",
+    "git-cliff>=2.13.1",
 ]
+
+[tool.pdm.scripts]
+changelog = "git-cliff --output CHANGELOG.md"
+next-version = "git-cliff --bumped-version"
