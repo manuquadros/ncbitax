@@ -1,4 +1,6 @@
 import csv
+import hashlib
+import inspect
 import os
 import pathlib
 import pickle
@@ -300,11 +302,32 @@ def source_mtime() -> float:
     return NAMES_PARQUET_PATH.stat().st_mtime
 
 
+def _index_build_id() -> str:
+    """Fingerprint of the code that decides what a saved index contains.
+
+    Hashing the source means nobody has to remember to bump a version, at the
+    cost of a rebuild when a comment inside one of these functions changes --
+    the cheap direction to be wrong in. Reading the source needs the ``.py``
+    files, which both a checkout and the wheel ship.
+    """
+    source = "".join(
+        inspect.getsource(fn)
+        for fn in (normalize, remove_citations, bacterial_name_index)
+    )
+    return hashlib.sha256(source.encode()).hexdigest()
+
+
 def get_index(index_file: pathlib.Path) -> NameIndex:
     if index_file.exists():
         with open(index_file, "rb") as f:
             cache = pickle.load(f)
-            if cache.get("mtime") >= source_mtime():
+            # The mtime covers the data the index was derived from; the build
+            # id covers the code that derived it. A pickle written before the
+            # id existed carries none and is a miss.
+            if (
+                cache.get("build_id") == _index_build_id()
+                and cache.get("mtime") >= source_mtime()
+            ):
                 return cache["data"]
 
     return {}
@@ -313,7 +336,14 @@ def get_index(index_file: pathlib.Path) -> NameIndex:
 def save_index(index: NameIndex, path: pathlib.Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open(mode="wb") as f:
-        pickle.dump({"mtime": source_mtime(), "data": index}, f)
+        pickle.dump(
+            {
+                "mtime": source_mtime(),
+                "build_id": _index_build_id(),
+                "data": index,
+            },
+            f,
+        )
 
 
 @cache

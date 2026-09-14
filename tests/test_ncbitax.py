@@ -5,6 +5,7 @@ from taxonomy.ncbitax import (
     decompose_name,
     DecomposedName,
 )
+from taxonomy.ncbitax import ncbitax
 
 
 def test_resolution():
@@ -37,3 +38,30 @@ def test_decompose_name():
     assert decompose_name("ATCC 51142") == DecomposedName(
         species=None, strain="ATCC 51142"
     )
+
+
+def test_index_cache_misses_when_the_code_that_built_it_changes(
+    tmp_path, monkeypatch
+):
+    """A cached index is served only while the code that shaped it stands.
+
+    The stored mtime covers names.parquet.zst and nothing else, so without a
+    build id a changed normalize() keeps answering off the keys the old one
+    produced.
+    """
+    parquet = tmp_path / "names.parquet.zst"
+    parquet.touch()
+    monkeypatch.setattr(ncbitax, "NAMES_PARQUET_PATH", parquet)
+
+    index_file = tmp_path / "bacteria_name_index.pickle"
+    index = {"escherichiacoli": ("Escherichia coli", 562)}
+    ncbitax.save_index(index=index, path=index_file)
+
+    assert ncbitax.get_index(index_file) == index
+
+    def normalize(name: str) -> str:
+        return name.lower() + "zzz"
+
+    monkeypatch.setattr(ncbitax, "normalize", normalize)
+
+    assert ncbitax.get_index(index_file) == {}
