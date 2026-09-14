@@ -329,9 +329,16 @@ def bacterial_name_index(rank: str) -> NameIndex:
     if index:
         return index
 
-    bacnodes = nodes().query("division_id == 0 & rank == 'species'", engine="python")
-    bac_genus_nodes = nodes().query("division_id == 0 & rank == 'genus'", engine="python")
-    name_classes = (
+    # bacnodes, bac_genus_nodes and name_classes are referenced below only as
+    # `@name` inside .query() strings, which pandas resolves from this local
+    # scope at call time -- invisible to ruff's static unused-variable check.
+    bacnodes = nodes().query(  # noqa: F841
+        "division_id == 0 & rank == 'species'", engine="python"
+    )
+    bac_genus_nodes = nodes().query(  # noqa: F841
+        "division_id == 0 & rank == 'genus'", engine="python"
+    )
+    name_classes = (  # noqa: F841
         "synonym",
         "scientific name",
         "equivalent name",
@@ -341,25 +348,34 @@ def bacterial_name_index(rank: str) -> NameIndex:
     is_bac_id = "(tax_id in @bacnodes['tax_id'].values)"
 
     if rank == "species":
-        _names = names().query(f"{is_bac_id} & (name_class in @name_classes)", engine="python")
+        _names = names().query(
+            f"{is_bac_id} & (name_class in @name_classes)", engine="python"
+        )
         # For species names, we also remove citations before normalizing
         _names["norm"] = _names["name_txt"].apply(
             lambda n: normalize(remove_citations(n))
         )
         desc = "Bacterial species names"
     elif rank == "genus":
-        _names = names().query("tax_id in @bac_genus_nodes['tax_id'].values", engine="python")
+        _names = names().query(
+            "tax_id in @bac_genus_nodes['tax_id'].values", engine="python"
+        )
         _names["norm"] = _names["name_txt"].apply(
             lambda n: normalize(remove_citations(n))
         )
         desc = "Bacterial genus names"
     elif rank == "strain":
-        strain_nodes = nodes().query("division_id == 0 & rank == 'strain'", engine="python")
+        # strain_nodes: same @name-in-query() case as above.
+        strain_nodes = nodes().query(  # noqa: F841
+            "division_id == 0 & rank == 'strain'", engine="python"
+        )
         type_material = f"{is_bac_id} & name_class == 'type material'"
         is_strain_id = "tax_id in @strain_nodes['tax_id'].values"
         strain_node_cond = f"{is_strain_id} & name_class in @name_classes"
 
-        _names = names().query(f"({type_material}) | ({strain_node_cond})", engine="python")
+        _names = names().query(
+            f"({type_material}) | ({strain_node_cond})", engine="python"
+        )
         _names["norm"] = _names["name_txt"].apply(normalize)
         desc = "Bacterial strain names"
 
@@ -467,7 +483,6 @@ def _names_by_tax_id() -> DataFrameGroupBy:
 
 def get_name_txt(tax_id: int, name_class: str) -> str | None:
     """Get name of `name_class` type for `tax_id."""
-    nodes_indexed = _nodes_indexed()  # cached
     names_by_taxid = _names_by_tax_id()  # cached
     group = names_by_taxid.get_group(tax_id)
     match = group[group["name_class"] == name_class]

@@ -1,5 +1,3 @@
-import pandas as pd
-
 from .ncbitax import (
     DATA_DIR,
     DecomposedName,
