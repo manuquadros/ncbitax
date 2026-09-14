@@ -36,6 +36,8 @@ conventional_commits = true
 filter_unconventional = true
 tag_pattern = "v[0-9]*"
 commit_parsers = [
+  # The release commit this script makes is bookkeeping, not a change.
+  { message = "^docs: changelog for", skip = true },
   { message = "^\\w+(\\(.+\\))?!:", group = "<!-- 0 -->Breaking" },
   { message = "^feat",              group = "<!-- 1 -->Added" },
   { message = "^fix",               group = "<!-- 2 -->Fixed" },

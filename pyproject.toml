@@ -47,3 +47,4 @@ dev = [
 [tool.pdm.scripts]
 changelog = "git-cliff --output CHANGELOG.md"
 next-version = "git-cliff --bumped-version"
+release = "python scripts/release.py"
