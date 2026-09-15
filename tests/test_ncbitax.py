@@ -102,6 +102,57 @@ def test_index_cache_misses_when_the_parser_of_its_input_changes(
     assert ncbitax.get_index(index_file) == {}
 
 
+def test_index_cache_misses_when_its_parquet_is_deleted(tmp_path, monkeypatch):
+    """An index is dropped with the parquet it was built from.
+
+    The dump stays in place because that is the trap: an index saved against
+    parquet and dump both outranks the dump alone, so falling back to the
+    dump's mtime would leave the deleted parquet's index standing.
+    """
+    parquet = tmp_path / "names.parquet.zst"
+    parquet.touch()
+    dump = tmp_path / "taxdump.tar.gz"
+    dump.touch()
+    monkeypatch.setattr(ncbitax, "NAMES_PARQUET_PATH", parquet)
+    monkeypatch.setattr(ncbitax, "taxdump", dump)
+
+    index_file = tmp_path / "bacteria_name_index.pickle"
+    index = {"escherichiacoli": ("Escherichia coli", 562)}
+    ncbitax.save_index(index=index, path=index_file)
+
+    assert ncbitax.get_index(index_file) == index
+
+    parquet.unlink()
+
+    assert ncbitax.get_index(index_file) == {}
+
+
+def test_index_saved_without_a_parquet_never_goes_current(
+    tmp_path, monkeypatch
+):
+    """An index stamped with no parquet under it stays a miss once one is back.
+
+    save_index stamps whatever source_mtime() knows, and with the parquet
+    deleted -- under a live process whose frames are already memoized, so
+    nothing rewrites it -- that is nothing at all. The pickle outlives the
+    deletion, so the stored stamp has to be checked as well as the computed
+    one.
+    """
+    parquet = tmp_path / "names.parquet.zst"
+    dump = tmp_path / "taxdump.tar.gz"
+    dump.touch()
+    monkeypatch.setattr(ncbitax, "NAMES_PARQUET_PATH", parquet)
+    monkeypatch.setattr(ncbitax, "taxdump", dump)
+
+    index_file = tmp_path / "bacteria_name_index.pickle"
+    index = {"escherichiacoli": ("Escherichia coli", 562)}
+    ncbitax.save_index(index=index, path=index_file)
+
+    parquet.touch()
+
+    assert ncbitax.get_index(index_file) == {}
+
+
 def clear_memos() -> None:
     """Drop every memo that could hold a frame or an index across a rebuild."""
     for memoized in (

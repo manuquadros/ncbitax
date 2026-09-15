@@ -337,15 +337,21 @@ def nodes() -> pd.DataFrame:
 type NameIndex = dict[str, tuple[str, int]]
 
 
-def source_mtime() -> float:
-    """Mtime of the newest data a name index is derived from.
+def source_mtime() -> float | None:
+    """Mtime of the newest data a name index is derived from, if any.
 
     The dump counts even though an index is built out of the parquets: a
     parquet older than the dump is rebuilt from it before the index is, so an
     index keyed on the parquet alone would go on answering for a dump that has
     already been replaced. A dump that is absent cannot be compared against.
+    An absent names parquet yields None, not the dump's mtime alone: an index
+    saved against parquet and dump both outranks the dump, so deleting the
+    parquets by hand would leave that index standing.
     """
-    parquet_mtime = NAMES_PARQUET_PATH.stat().st_mtime
+    try:
+        parquet_mtime = NAMES_PARQUET_PATH.stat().st_mtime
+    except FileNotFoundError:
+        return None
 
     if taxdump.exists():
         return max(parquet_mtime, taxdump.stat().st_mtime)
@@ -374,14 +380,21 @@ def get_index(index_file: pathlib.Path) -> NameIndex:
     if index_file.exists():
         with open(index_file, "rb") as f:
             cache = pickle.load(f)
-            # The mtime covers the data the index was derived from; the build
-            # id covers the code that derived it. A pickle written before the
-            # id existed carries none and is a miss.
-            if (
-                cache.get("build_id") == _index_build_id()
-                and cache.get("mtime") >= source_mtime()
-            ):
-                return cache["data"]
+
+        data_mtime = source_mtime()
+        stored_mtime = cache.get("mtime")
+        # The mtime covers the data the index was derived from; the build id
+        # covers the code that derived it. A pickle written before the id
+        # existed carries none, a pickle saved while the parquet was gone
+        # carries no mtime, and a parquet deleted since leaves none to compare
+        # against: each is a miss.
+        if (
+            cache.get("build_id") == _index_build_id()
+            and data_mtime is not None
+            and stored_mtime is not None
+            and stored_mtime >= data_mtime
+        ):
+            return cache["data"]
 
     return {}
 
