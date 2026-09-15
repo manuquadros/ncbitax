@@ -61,7 +61,6 @@ def _resolve_data_dir() -> pathlib.Path:
 
 DATA_DIR = _resolve_data_dir()
 taxdump = DATA_DIR / "taxdump.tar.gz"
-NAMEINDEX_CACHE_PATH = DATA_DIR / "name_index.pickle"
 NAMES_PARQUET_PATH = DATA_DIR / "names.parquet.zst"
 
 
