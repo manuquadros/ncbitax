@@ -85,6 +85,19 @@ def test_env_var_overrides_everything(tmp_path):
         assert pathlib.Path(data_dir) == override
 
 
+def test_rootdir_is_not_a_public_data_path():
+    """The wheel-unsafe checkout-root path must not look like public API.
+
+    A caller that wants the resolved data directory has ``DATA_DIR``; the
+    raw ``__file__``-derived root stays private so nothing outside this
+    module reaches for a name that is wrong under an installed wheel.
+    """
+    from taxonomy.ncbitax import ncbitax
+
+    assert not hasattr(ncbitax, "ROOTDIR")
+    assert hasattr(ncbitax, "_ROOTDIR")
+
+
 def test_missing_dump_without_download_raises_clearly(tmp_path):
     """With auto-download off, a missing dump names the file and the way out."""
     empty = tmp_path / "empty"

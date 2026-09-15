@@ -19,7 +19,9 @@ import pyarrow.parquet as pq
 from pandas.api.typing import DataFrameGroupBy
 from tqdm import tqdm
 
-ROOTDIR = pathlib.Path(__file__).parent.parent.parent.parent
+# Private: only valid for _in_source_checkout()'s own check, and wrong under
+# a wheel install. DATA_DIR below is the wheel-safe constant callers want.
+_ROOTDIR = pathlib.Path(__file__).parent.parent.parent.parent
 
 TAXDUMP_URL = "https://ftp.ncbi.nlm.nih.gov/pub/taxonomy/taxdump.tar.gz"
 
@@ -33,11 +35,11 @@ def _in_source_checkout() -> bool:
 
     True for a git checkout and for an editable install, both of which keep
     ``__file__`` inside ``src/taxonomy/ncbitax``. False for a wheel install,
-    where ``ROOTDIR`` lands on an unrelated directory such as
+    where ``_ROOTDIR`` lands on an unrelated directory such as
     ``lib/python3.12``.
     """
-    return (ROOTDIR / "pyproject.toml").is_file() and (
-        ROOTDIR / "src" / "taxonomy"
+    return (_ROOTDIR / "pyproject.toml").is_file() and (
+        _ROOTDIR / "src" / "taxonomy"
     ).is_dir()
 
 
@@ -53,7 +55,7 @@ def _resolve_data_dir() -> pathlib.Path:
         return pathlib.Path(env_dir).expanduser()
 
     if _in_source_checkout():
-        return ROOTDIR / "resources"
+        return _ROOTDIR / "resources"
 
     cache_home = os.environ.get("XDG_CACHE_HOME") or "~/.cache"
     return pathlib.Path(cache_home).expanduser() / "ncbitax"
