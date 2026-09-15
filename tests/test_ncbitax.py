@@ -146,8 +146,9 @@ def test_get_index_is_a_cache_miss_for_a_corrupt_pickle(
     """A pickle pickle.load() can't parse, or parses into something other
     than the expected dict, is a miss like any other -- not a crash.
 
-    save_index() writes in place with no .part-then-rename, so an
-    interrupted run can leave exactly this behind.
+    save_index() writes atomically, but a pickle can still end up corrupt
+    for reasons outside its control (disk error, hand edit), so get_index
+    has to tolerate one regardless.
     """
     parquet = tmp_path / "names.parquet.zst"
     parquet.touch()
@@ -184,6 +185,41 @@ def test_index_saved_without_a_parquet_never_goes_current(
     parquet.touch()
 
     assert ncbitax.get_index(index_file) == {}
+
+
+def test_save_index_writes_to_a_part_file_before_replacing(
+    tmp_path, monkeypatch
+):
+    """save_index must never let a reader see a half-written pickle.
+
+    A concurrent writer and reader race on the same path, so the write has to
+    land on a temporary sibling and only then replace the real file -- the
+    same pattern download_taxdump already uses for the archive.
+    """
+    parquet = tmp_path / "names.parquet.zst"
+    parquet.touch()
+    monkeypatch.setattr(ncbitax, "NAMES_PARQUET_PATH", parquet)
+    monkeypatch.setattr(ncbitax, "taxdump", tmp_path / "taxdump.tar.gz")
+
+    index_file = tmp_path / "bacteria_name_index.pickle"
+    part_file = index_file.with_name(index_file.name + ".part")
+    index = {"escherichiacoli": ("Escherichia coli", 562)}
+
+    seen_names = []
+    real_dump = pickle.dump
+
+    def recording_dump(obj, f):
+        seen_names.append(pathlib.Path(f.name).name)
+        real_dump(obj, f)
+
+    monkeypatch.setattr(ncbitax.pickle, "dump", recording_dump)
+
+    ncbitax.save_index(index=index, path=index_file)
+
+    assert seen_names == [part_file.name]
+    assert index_file.exists()
+    assert not part_file.exists()
+    assert ncbitax.get_index(index_file) == index
 
 
 def clear_memos() -> None:
@@ -301,6 +337,37 @@ def test_parquet_is_served_when_the_dump_is_gone(data_dir):
 
     clear_memos()
     assert ncbitax.load_df("division")["division_name"][0] == "Bacteria"
+
+
+def test_load_df_writes_parquet_to_a_part_file_before_replacing(
+    data_dir, monkeypatch
+):
+    """load_df must never let a reader see a half-written parquet.
+
+    Two processes racing to rebuild a stale cache both miss and both write,
+    so the write has to land on a temporary sibling and only then replace
+    the real file -- the same pattern download_taxdump already uses.
+    """
+    write_dump(
+        data_dir / "taxdump.tar.gz", division=[("0", "BCT", "Bacteria", "")]
+    )
+
+    filepath = data_dir / "division.parquet.zst"
+    part_file = filepath.with_name(filepath.name + ".part")
+    seen_names = []
+    real_write_table = ncbitax.pq.write_table
+
+    def recording_write_table(table, where, **kwargs):
+        seen_names.append(pathlib.Path(where).name)
+        return real_write_table(table, where, **kwargs)
+
+    monkeypatch.setattr(ncbitax.pq, "write_table", recording_write_table)
+
+    ncbitax.load_df("division")
+
+    assert seen_names == [part_file.name]
+    assert filepath.exists()
+    assert not part_file.exists()
 
 
 def test_name_index_rebuilt_when_the_dump_is_newer(data_dir):

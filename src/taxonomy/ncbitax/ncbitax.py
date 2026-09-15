@@ -311,11 +311,13 @@ def load_df(table: str) -> pd.DataFrame:
     arrow_table = pa.Table.from_pandas(df, preserve_index=False)
     metadata = dict(arrow_table.schema.metadata or {})
     metadata[_PARQUET_BUILD_ID_KEY] = _parquet_build_id().encode()
+    partial = filepath.with_name(filepath.name + ".part")
     pq.write_table(
         arrow_table.replace_schema_metadata(metadata),
-        filepath,
+        partial,
         compression="zstd",
     )
+    partial.replace(filepath)
     return df
 
 
@@ -387,10 +389,11 @@ def _index_build_id() -> str:
 
 def get_index(index_file: pathlib.Path) -> NameIndex:
     if index_file.exists():
-        # save_index() writes in place with no .part-then-rename, so a run
-        # interrupted mid-write can leave a truncated or garbage file behind;
-        # a pickle.load() that fails on it, or that succeeds on something
-        # other than the dict this format expects, is a miss like any other.
+        # A pickle can still be corrupt for reasons outside save_index()'s
+        # control (disk error, hand edit, a process killed mid .part write
+        # before the rename lands); a pickle.load() that fails on it, or
+        # that succeeds on something other than the dict this format
+        # expects, is a miss like any other.
         try:
             with open(index_file, "rb") as f:
                 cache = pickle.load(f)
@@ -417,7 +420,8 @@ def get_index(index_file: pathlib.Path) -> NameIndex:
 
 def save_index(index: NameIndex, path: pathlib.Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open(mode="wb") as f:
+    partial = path.with_name(path.name + ".part")
+    with partial.open(mode="wb") as f:
         pickle.dump(
             {
                 "mtime": source_mtime(),
@@ -426,6 +430,7 @@ def save_index(index: NameIndex, path: pathlib.Path) -> None:
             },
             f,
         )
+    partial.replace(path)
 
 
 @cache
