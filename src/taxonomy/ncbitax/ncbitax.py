@@ -141,14 +141,13 @@ while True:
 
 
 class NCBIDump(TextIOBase):
-    def __init__(self, table: str, sep=","):
+    def __init__(self, table: str):
         self._table = table + (".dmp" if not table.endswith(".dmp") else "")
 
         self._delimiter = r"\t\|\t|\t\|\n"
         self._unquoted_field = re.compile(
             rf"([^\t]*,[^\t]*)(?={self._delimiter})"
         )
-        self.sep = sep
         self.unescaped_quote = re.compile(r'(?<!\\)"')
 
     def preprocess(self, text: str) -> str:
@@ -159,7 +158,7 @@ class NCBIDump(TextIOBase):
         line = self.preprocess(self._file.readline(*args))
 
         if line:
-            return line.replace("\t|\t", self.sep).replace("\t|\n", "\n")
+            return line.replace("\t|\t", ",").replace("\t|\n", "\n")
         return ""
 
     def __enter__(self):
