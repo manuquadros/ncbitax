@@ -419,12 +419,20 @@ def get_index(index_file: pathlib.Path) -> NameIndex:
 
 
 def save_index(index: NameIndex, path: pathlib.Path) -> None:
+    mtime = source_mtime()
+    # A None mtime can never satisfy get_index()'s stored_mtime-is-not-None
+    # guard, so this write would be dead on arrival; skipping it also spares
+    # an older pin sharing this cache dir from crashing on a stored None it
+    # compares with `>=` unguarded.
+    if mtime is None:
+        return
+
     path.parent.mkdir(parents=True, exist_ok=True)
     partial = path.with_name(path.name + ".part")
     with partial.open(mode="wb") as f:
         pickle.dump(
             {
-                "mtime": source_mtime(),
+                "mtime": mtime,
                 "build_id": _index_build_id(),
                 "data": index,
             },

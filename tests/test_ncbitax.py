@@ -164,13 +164,11 @@ def test_get_index_is_a_cache_miss_for_a_corrupt_pickle(
 def test_index_saved_without_a_parquet_never_goes_current(
     tmp_path, monkeypatch
 ):
-    """An index stamped with no parquet under it stays a miss once one is back.
+    """An index built with no parquet under it never gets served, even once
+    one is back.
 
-    save_index stamps whatever source_mtime() knows, and with the parquet
-    deleted -- under a live process whose frames are already memoized, so
-    nothing rewrites it -- that is nothing at all. The pickle outlives the
-    deletion, so the stored stamp has to be checked as well as the computed
-    one.
+    save_index() now skips the write entirely when source_mtime() is None,
+    so no pickle exists to touch the parquet's return into validating.
     """
     parquet = tmp_path / "names.parquet.zst"
     dump = tmp_path / "taxdump.tar.gz"
@@ -220,6 +218,27 @@ def test_save_index_writes_to_a_part_file_before_replacing(
     assert index_file.exists()
     assert not part_file.exists()
     assert ncbitax.get_index(index_file) == index
+
+
+def test_save_index_skips_the_write_when_source_mtime_is_none(
+    tmp_path, monkeypatch
+):
+    """save_index() must not create a pickle it would stamp {"mtime": None}.
+
+    A stored None can never satisfy get_index()'s guard even today, so the
+    write is dead on arrival -- and an older pin sharing this cache dir reads
+    that stamp with an unguarded ``>=`` and crashes on it.
+    """
+    parquet = tmp_path / "names.parquet.zst"
+    monkeypatch.setattr(ncbitax, "NAMES_PARQUET_PATH", parquet)
+    monkeypatch.setattr(ncbitax, "taxdump", tmp_path / "taxdump.tar.gz")
+
+    index_file = tmp_path / "bacteria_name_index.pickle"
+    ncbitax.save_index(
+        index={"escherichiacoli": ("Escherichia coli", 562)}, path=index_file
+    )
+
+    assert not index_file.exists()
 
 
 def clear_memos() -> None:
