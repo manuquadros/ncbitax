@@ -12,12 +12,12 @@ import urllib.request
 from dataclasses import dataclass
 from functools import cache, lru_cache
 from io import TextIOBase, TextIOWrapper
-from tqdm import tqdm
 
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 from pandas.api.typing import DataFrameGroupBy
+from tqdm import tqdm
 
 ROOTDIR = pathlib.Path(__file__).parent.parent.parent.parent
 
@@ -143,10 +143,7 @@ while True:
 
 class NCBIDump(TextIOBase):
     def __init__(self, table: str, sep=","):
-        if table[:-4] != ".dmp":
-            self._table = table + ".dmp"
-        else:
-            self._table = table
+        self._table = table + (".dmp" if not table.endswith(".dmp") else "")
 
         self._delimiter = r"\t\|\t|\t\|\n"
         self._unquoted_field = re.compile(
