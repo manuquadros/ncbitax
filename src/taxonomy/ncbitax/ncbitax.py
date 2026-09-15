@@ -380,23 +380,30 @@ def _index_build_id() -> str:
 
 def get_index(index_file: pathlib.Path) -> NameIndex:
     if index_file.exists():
-        with open(index_file, "rb") as f:
-            cache = pickle.load(f)
+        # save_index() writes in place with no .part-then-rename, so a run
+        # interrupted mid-write can leave a truncated or garbage file behind;
+        # a pickle.load() that fails on it, or that succeeds on something
+        # other than the dict this format expects, is a miss like any other.
+        try:
+            with open(index_file, "rb") as f:
+                cache = pickle.load(f)
 
-        data_mtime = source_mtime()
-        stored_mtime = cache.get("mtime")
-        # The mtime covers the data the index was derived from; the build id
-        # covers the code that derived it. A pickle written before the id
-        # existed carries none, a pickle saved while the parquet was gone
-        # carries no mtime, and a parquet deleted since leaves none to compare
-        # against: each is a miss.
-        if (
-            cache.get("build_id") == _index_build_id()
-            and data_mtime is not None
-            and stored_mtime is not None
-            and stored_mtime >= data_mtime
-        ):
-            return cache["data"]
+            data_mtime = source_mtime()
+            stored_mtime = cache.get("mtime")
+            # The mtime covers the data the index was derived from; the
+            # build id covers the code that derived it. A pickle written
+            # before the id existed carries none, a pickle saved while the
+            # parquet was gone carries no mtime, and a parquet deleted since
+            # leaves none to compare against: each is a miss.
+            if (
+                cache.get("build_id") == _index_build_id()
+                and data_mtime is not None
+                and stored_mtime is not None
+                and stored_mtime >= data_mtime
+            ):
+                return cache["data"]
+        except (pickle.UnpicklingError, EOFError, ValueError, AttributeError):
+            return {}
 
     return {}
 

@@ -1,6 +1,7 @@
 import io
 import os
 import pathlib
+import pickle
 import tarfile
 
 import pytest
@@ -123,6 +124,38 @@ def test_index_cache_misses_when_its_parquet_is_deleted(tmp_path, monkeypatch):
     assert ncbitax.get_index(index_file) == index
 
     parquet.unlink()
+
+    assert ncbitax.get_index(index_file) == {}
+
+
+@pytest.mark.parametrize(
+    "corrupt_bytes",
+    [
+        pytest.param(b"", id="empty"),
+        pytest.param(
+            pickle.dumps({"mtime": 1.0, "build_id": "x", "data": {}})[:10],
+            id="truncated",
+        ),
+        pytest.param(b"\x00garbage not a pickle at all\xff", id="garbage"),
+        pytest.param(pickle.dumps(["not", "a", "dict"]), id="pickled-non-dict"),
+    ],
+)
+def test_get_index_is_a_cache_miss_for_a_corrupt_pickle(
+    tmp_path, monkeypatch, corrupt_bytes
+):
+    """A pickle pickle.load() can't parse, or parses into something other
+    than the expected dict, is a miss like any other -- not a crash.
+
+    save_index() writes in place with no .part-then-rename, so an
+    interrupted run can leave exactly this behind.
+    """
+    parquet = tmp_path / "names.parquet.zst"
+    parquet.touch()
+    monkeypatch.setattr(ncbitax, "NAMES_PARQUET_PATH", parquet)
+    monkeypatch.setattr(ncbitax, "taxdump", tmp_path / "taxdump.tar.gz")
+
+    index_file = tmp_path / "bacteria_name_index.pickle"
+    index_file.write_bytes(corrupt_bytes)
 
     assert ncbitax.get_index(index_file) == {}
 
