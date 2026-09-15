@@ -188,15 +188,7 @@ def test_index_saved_without_a_parquet_never_goes_current(
 
 def clear_memos() -> None:
     """Drop every memo that could hold a frame or an index across a rebuild."""
-    for memoized in (
-        ncbitax.load_df,
-        ncbitax.bacterial_name_index,
-        ncbitax.get_node,
-        ncbitax.decompose_name,
-        ncbitax._nodes_indexed,
-        ncbitax._names_by_tax_id,
-    ):
-        memoized.cache_clear()
+    ncbitax._clear_memos()
 
 
 @pytest.fixture
@@ -362,5 +354,60 @@ def test_lookups_agree_after_a_taxon_is_reissued(data_dir):
     make_newest(dump)
 
     clear_memos()
+    assert resolve_tax_id("Escherichia coli") == 2002
+    assert is_bacteria("Escherichia coli")
+
+
+class _FakeDownload:
+    """A urlopen() response replaying `data` in one chunk."""
+
+    def __init__(self, data: bytes):
+        self._data = data
+        self.headers = {"Content-Length": str(len(data))}
+
+    def __enter__(self) -> "_FakeDownload":
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        return None
+
+    def read(self, size: int) -> bytes:
+        chunk, self._data = self._data[:size], self._data[size:]
+        return chunk
+
+
+def test_download_taxdump_invalidates_a_warm_process(data_dir, monkeypatch):
+    """download_taxdump() must not leave a live process split across dumps.
+
+    resolve_tax_id, warmed from an on-disk pickle alone, never touches
+    load_df; without download_taxdump clearing both memos together, a lookup
+    right after the swap would resolve the retired tax_id through a nodes
+    frame already rebuilt from the new dump, an answer neither dump gives.
+    """
+    dump = data_dir / "taxdump.tar.gz"
+    write_dump(
+        dump,
+        nodes=[bacterial_species("1001")],
+        names=[scientific_name("1001", "Escherichia coli")],
+    )
+    assert resolve_tax_id("Escherichia coli") == 1001
+
+    clear_memos()
+    assert resolve_tax_id("Escherichia coli") == 1001  # from the pickle alone
+
+    new_dump = data_dir / "new_taxdump.tar.gz"
+    write_dump(
+        new_dump,
+        nodes=[bacterial_species("2002")],
+        names=[scientific_name("2002", "Escherichia coli")],
+    )
+    payload = new_dump.read_bytes()
+    monkeypatch.setattr(
+        "urllib.request.urlopen", lambda url: _FakeDownload(payload)
+    )
+
+    ncbitax.download_taxdump()
+    make_newest(dump)
+
     assert resolve_tax_id("Escherichia coli") == 2002
     assert is_bacteria("Escherichia coli")

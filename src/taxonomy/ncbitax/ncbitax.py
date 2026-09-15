@@ -79,7 +79,10 @@ def download_taxdump(dest: pathlib.Path | None = None) -> pathlib.Path:
 
     The download goes to a temporary sibling file that is renamed into place
     only once complete, so an interrupted transfer never leaves a truncated
-    archive behind for the next run to choke on.
+    archive behind for the next run to choke on. Replacing the live dump this
+    way also clears every frame and index memoized from the old one, so a
+    process that keeps running past the swap does not go on answering from a
+    mix of both dumps; fetching to some other `dest` leaves them alone.
     """
     dest = taxdump if dest is None else dest
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -110,6 +113,10 @@ def download_taxdump(dest: pathlib.Path | None = None) -> pathlib.Path:
         ) from err
 
     partial.replace(dest)
+
+    if dest == taxdump:
+        _clear_memos()
+
     return dest
 
 
@@ -654,3 +661,22 @@ def decompose_name(query: str) -> DecomposedName | None:
         current_id = current_node["parent_tax_id"]
         if current_id == 1:  # Hit root without finding species
             return DecomposedName(species=None, strain=None)
+
+
+def _clear_memos() -> None:
+    """Drop every frame or index memoized from the dump or its parquets.
+
+    Each of these checks freshness only when it is next recomputed, so
+    leaving any of them warm across a dump swap would let it go on answering
+    for the dump it was built from -- ``download_taxdump`` calls this so a
+    live process cannot answer from a mix of both.
+    """
+    for memoized in (
+        load_df,
+        bacterial_name_index,
+        get_node,
+        decompose_name,
+        _nodes_indexed,
+        _names_by_tax_id,
+    ):
+        memoized.cache_clear()
