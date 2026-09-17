@@ -291,6 +291,11 @@ def scientific_name(tax_id: str, name: str) -> tuple[str, ...]:
     return (tax_id, name, "", "scientific name")
 
 
+def synonym(tax_id: str, name: str) -> tuple[str, ...]:
+    """A names.dmp row carrying a synonym."""
+    return (tax_id, name, "", "synonym")
+
+
 def make_newest(path: pathlib.Path) -> None:
     """Stamp `path` a second past every file beside it.
 
@@ -442,6 +447,30 @@ def test_lookups_agree_after_a_taxon_is_reissued(data_dir):
     clear_memos()
     assert resolve_tax_id("Escherichia coli") == 2002
     assert is_bacteria("Escherichia coli")
+
+
+def test_resolve_tax_id_prefers_scientific_name_over_a_colliding_synonym(
+    data_dir,
+):
+    """A synonym that normalizes onto another taxon's scientific name never
+    outranks it, regardless of dump row order.
+
+    NCBI carries taxid 29581's old synonym '"Chromobacterium violaceum" Ford
+    1927', which strips down to the same normalized key as taxid 536's own
+    scientific name -- a real collision a downstream consumer found, where
+    the index used to hand out 29581 for it.
+    """
+    dump = data_dir / "taxdump.tar.gz"
+    write_dump(
+        dump,
+        nodes=[bacterial_species("536"), bacterial_species("29581")],
+        names=[
+            scientific_name("536", "Chromobacterium violaceum"),
+            synonym("29581", '"Chromobacterium violaceum" Ford 1927'),
+        ],
+    )
+
+    assert resolve_tax_id("Chromobacterium violaceum") == 536
 
 
 class _FakeDownload:

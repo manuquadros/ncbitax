@@ -9,6 +9,7 @@ import sys
 import tarfile
 import urllib.error
 import urllib.request
+from collections.abc import Iterable
 from dataclasses import dataclass
 from functools import cache, lru_cache
 from io import TextIOBase, TextIOWrapper
@@ -382,7 +383,12 @@ def _index_build_id() -> str:
     """
     source = "".join(
         inspect.getsource(fn)
-        for fn in (normalize, remove_citations, bacterial_name_index)
+        for fn in (
+            normalize,
+            remove_citations,
+            _priority_index,
+            bacterial_name_index,
+        )
     )
     return hashlib.sha256((_parquet_build_id() + source).encode()).hexdigest()
 
@@ -439,6 +445,47 @@ def save_index(index: NameIndex, path: pathlib.Path) -> None:
             f,
         )
     partial.replace(path)
+
+
+def _priority_index(
+    rows: Iterable[tuple[str, str, int, str]],
+) -> NameIndex:
+    """Normalized key -> (name, tax_id), a scientific name outranking a
+    synonym for the same key.
+
+    Mirrors d3text's own ``all_division_name_index``: a key more than one
+    tax_id claims is dropped rather than resolved by row order, since a
+    wrong tax_id returned with high confidence is worse than none. A
+    scientific-name row beats every synonym/common/equivalent-name row it
+    collides with, unless the key is itself claimed by more than one
+    tax_id's scientific name, in which case it drops too.
+    """
+    preferred: dict[str, tuple[str, int]] = {}
+    fallback: dict[str, tuple[str, int]] = {}
+    contested: dict[bool, set[str]] = {True: set(), False: set()}
+
+    for key, name, tax_id, name_class in rows:
+        if not key:
+            continue
+        scientific = name_class == "scientific name"
+        table = preferred if scientific else fallback
+        held = table.get(key)
+        if held is None:
+            table[key] = (name, tax_id)
+        elif held[1] != tax_id:
+            contested[scientific].add(key)
+
+    index = {
+        key: entry
+        for key, entry in fallback.items()
+        if key not in preferred and key not in contested[False]
+    }
+    index |= {
+        key: entry
+        for key, entry in preferred.items()
+        if key not in contested[True]
+    }
+    return index
 
 
 @cache
@@ -504,20 +551,14 @@ def bacterial_name_index(rank: str) -> NameIndex:
         _names["norm"] = _names["name_txt"].apply(normalize)
         desc = "Bacterial strain names"
 
-    scinames = dict(
-        _names.query("name_class == 'scientific name'", engine="python")[
-            ["tax_id", "name_txt"]
-        ].values
-    )
-
-    index = {
-        row.norm: (scinames.get(row.tax_id, row.name_txt), row.tax_id)
+    index = _priority_index(
+        (row.norm, row.name_txt, row.tax_id, row.name_class)
         for row in tqdm(
             _names.itertuples(index=False),
             total=len(_names),
             desc=desc,
         )
-    }
+    )
 
     save_index(index=index, path=index_cache_path)
 
