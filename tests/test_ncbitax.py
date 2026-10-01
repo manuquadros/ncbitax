@@ -277,13 +277,14 @@ def write_dump(path: pathlib.Path, **tables: list[tuple[str, ...]]) -> None:
 
 
 def bacterial_species(tax_id: str) -> tuple[str, ...]:
-    """A nodes.dmp row for a species of the bacterial division.
+    """A nodes.dmp row for a species under Bacteria (taxid 2).
 
-    Only tax_id, rank and division_id decide what an index holds; the eight
-    columns after them just have to be there and parse.
+    Only tax_id, parent, rank and division_id decide what an index or a
+    lineage test sees; the eight columns after them just have to be there
+    and parse.
     """
     rest = ("0", "11", "1", "0", "1", "0", "0", "")
-    return (tax_id, "1", "species", "", "0") + rest
+    return (tax_id, "2", "species", "", "0") + rest
 
 
 def scientific_name(tax_id: str, name: str) -> tuple[str, ...]:
@@ -526,3 +527,51 @@ def test_download_taxdump_invalidates_a_warm_process(data_dir, monkeypatch):
 
     assert resolve_tax_id("Escherichia coli") == 2002
     assert is_bacteria("Escherichia coli")
+
+
+def taxon_node(
+    tax_id: str, parent: str, rank: str, division: str
+) -> tuple[str, ...]:
+    """A nodes.dmp row placing `tax_id` under `parent`."""
+    rest = ("0", "11", "1", "0", "1", "0", "0", "")
+    return (tax_id, parent, rank, "", division) + rest
+
+
+@pytest.fixture
+def three_domains(data_dir):
+    """Bacteria and Archaea, both NCBI division 0, beside one eukaryote."""
+    write_dump(
+        data_dir / "taxdump.tar.gz",
+        nodes=[
+            taxon_node("1", "1", "no rank", "8"),
+            taxon_node("2", "1", "superkingdom", "0"),
+            taxon_node("2157", "1", "superkingdom", "0"),
+            taxon_node("2759", "1", "superkingdom", "1"),
+            taxon_node("1224", "2", "phylum", "0"),
+            taxon_node("562", "1224", "species", "0"),
+            taxon_node("56636", "2157", "species", "0"),
+            taxon_node("9606", "2759", "species", "5"),
+        ],
+        names=[
+            scientific_name("2", "Bacteria"),
+            scientific_name("2157", "Archaea"),
+            scientific_name("1224", "Pseudomonadota"),
+            scientific_name("562", "Escherichia coli"),
+            scientific_name("56636", "Aeropyrum pernix"),
+            scientific_name("9606", "Homo sapiens"),
+        ],
+    )
+
+
+def test_is_bacteria_excludes_archaea(three_domains):
+    """NCBI's bacterial division holds archaea too, so the division is not
+    the test: Bacteria is the taxon under NCBITaxon:2."""
+    assert is_bacteria("Escherichia coli")
+    assert not is_bacteria("Aeropyrum pernix")
+
+
+def test_is_bacteria_covers_ranks_above_genus(three_domains):
+    """A bacterial phylum is a bacterial taxon, though no species-, strain-
+    or genus-rank index holds its name."""
+    assert is_bacteria("Pseudomonadota")
+    assert not is_bacteria("Homo sapiens")

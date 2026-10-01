@@ -388,6 +388,7 @@ def _index_build_id() -> str:
             remove_citations,
             _priority_index,
             bacterial_name_index,
+            all_division_name_index,
         )
     )
     return hashlib.sha256((_parquet_build_id() + source).encode()).hexdigest()
@@ -488,6 +489,39 @@ def _priority_index(
     return index
 
 
+NAME_CLASSES = ("synonym", "scientific name", "equivalent name", "common name")
+"""The name classes a name index holds.
+
+`authority` and `type material` name a publication and a deposited culture,
+not the organism; only the bacterial strain index takes type material.
+"""
+
+BACTERIA_TAX_ID = 2
+
+
+@cache
+def all_division_name_index() -> NameIndex:
+    """Normalized name -> (name, tax_id), over every division of the dump."""
+    index_cache_path = DATA_DIR / "all_division_name_index.pickle"
+    index = get_index(index_cache_path)
+
+    if index:
+        return index
+
+    _names = names()
+    _names = _names[_names["name_class"].isin(NAME_CLASSES)]
+    index = _priority_index(
+        (normalize(remove_citations(name)), name, tax_id, name_class)
+        for name, tax_id, name_class in zip(
+            _names["name_txt"], _names["tax_id"], _names["name_class"]
+        )
+    )
+
+    save_index(index=index, path=index_cache_path)
+
+    return index
+
+
 @cache
 def bacterial_name_index(rank: str) -> NameIndex:
     _cache_paths = {
@@ -510,12 +544,7 @@ def bacterial_name_index(rank: str) -> NameIndex:
     bac_genus_nodes = nodes().query(  # noqa: F841
         "division_id == 0 & rank == 'genus'", engine="python"
     )
-    name_classes = (  # noqa: F841
-        "synonym",
-        "scientific name",
-        "equivalent name",
-        "common name",
-    )
+    name_classes = NAME_CLASSES  # noqa: F841
 
     is_bac_id = "(tax_id in @bacnodes['tax_id'].values)"
 
@@ -616,19 +645,38 @@ def is_bacterial_strain(query: str) -> bool:
     return get_rank(query) == "strain"
 
 
+def is_descendant(tax_id: int, ancestor: int) -> bool:
+    """Whether `ancestor` is `tax_id` or lies on its path to the root."""
+    nodes_indexed = _nodes_indexed()  # cached
+    current = tax_id
+
+    while current != ancestor:
+        try:
+            parent = int(nodes_indexed.at[current, "parent_tax_id"])
+        except KeyError:
+            return False
+        if parent == current:  # the root is its own parent
+            return False
+        current = parent
+
+    return True
+
+
 def is_bacteria(query: str) -> bool:
     """
-    Determine whether the given query refers to a bacterial taxon.
+    Determine whether the given query refers to a taxon under Bacteria.
+
+    NCBI's bacterial division also holds Archaea, so the division does not
+    decide it; descent from taxid 2 does. The name is looked up across every
+    division first, so a name above genus rank resolves too.
 
     :param query: Scientific name (possibly fuzzy), e.g., 'E. coli'
-    :return: True if the query resolves to a bacterial tax_id, else False
+    :return: True if the query resolves to a tax_id under Bacteria
     """
-    node = get_node(query)
+    found = all_division_name_index().get(normalize(query))
+    tax_id = found[1] if found is not None else resolve_tax_id(query)
 
-    if node is not None:
-        return node["division_id"] == 0
-
-    return False
+    return tax_id is not None and is_descendant(tax_id, BACTERIA_TAX_ID)
 
 
 @dataclass
@@ -728,6 +776,7 @@ def _clear_memos() -> None:
     for memoized in (
         load_df,
         bacterial_name_index,
+        all_division_name_index,
         get_node,
         decompose_name,
         _nodes_indexed,
