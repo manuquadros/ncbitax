@@ -44,7 +44,13 @@ def test_decompose_name():
     ) == DecomposedName(species="Raphidiopsis brookii", strain=None)
 
     assert decompose_name("ATCC 51142") == DecomposedName(
-        species=None, strain="ATCC 51142"
+        species="Crocosphaera subtropica", strain="ATCC 51142"
+    )
+
+
+def test_decompose_name_resolves_the_species_of_a_type_material_name():
+    assert decompose_name("DSM 30083") == DecomposedName(
+        species="Escherichia coli", strain="DSM 30083"
     )
 
 
