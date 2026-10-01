@@ -673,10 +673,20 @@ def is_bacteria(query: str) -> bool:
     :param query: Scientific name (possibly fuzzy), e.g., 'E. coli'
     :return: True if the query resolves to a tax_id under Bacteria
     """
-    found = all_division_name_index().get(normalize(query))
-    tax_id = found[1] if found is not None else resolve_tax_id(query)
+    tax_id = resolve_any_tax_id(query)
 
     return tax_id is not None and is_descendant(tax_id, BACTERIA_TAX_ID)
+
+
+def resolve_any_tax_id(query: str) -> int | None:
+    """Resolve a name from any division to its tax_id.
+
+    Falls back to `resolve_tax_id`, whose strain index also holds type
+    material, which the all-division index leaves out.
+    """
+    found = all_division_name_index().get(normalize(query))
+
+    return found[1] if found is not None else resolve_tax_id(query)
 
 
 @dataclass

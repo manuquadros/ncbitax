@@ -10,6 +10,7 @@ from .ncbitax import (
     is_descendant,
     names,
     nodes,
+    resolve_any_tax_id,
     resolve_tax_id,
     taxdump_path,
 )
@@ -19,6 +20,7 @@ __all__ = [
     "names",
     "nodes",
     "resolve_tax_id",
+    "resolve_any_tax_id",
     "is_bacteria",
     "is_bacterial_strain",
     "is_descendant",

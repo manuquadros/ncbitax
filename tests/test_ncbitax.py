@@ -575,3 +575,11 @@ def test_is_bacteria_covers_ranks_above_genus(three_domains):
     or genus-rank index holds its name."""
     assert is_bacteria("Pseudomonadota")
     assert not is_bacteria("Homo sapiens")
+
+
+def test_resolve_any_tax_id_tells_unresolved_from_not_bacterial(three_domains):
+    """A caller falling back to its own rule for unresolved names needs the
+    taxid or None, which is_bacteria's bool cannot give it."""
+    assert ncbitax.resolve_any_tax_id("Homo sapiens") == 9606
+    assert ncbitax.resolve_any_tax_id("Pseudomonadota") == 1224
+    assert ncbitax.resolve_any_tax_id("Nonexistentia fictiva") is None
